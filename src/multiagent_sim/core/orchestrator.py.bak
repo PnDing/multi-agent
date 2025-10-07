@@ -1,0 +1,198 @@
+"""Round-based simulation orchestrator."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+
+from ..agents.detector import DetectorAgent
+from ..agents.generator import GeneratorAgent
+from ..agents.user import UserAgent
+from ..community.experience import Experience
+from ..community.graph import CommunityGraph
+from ..core.news import NewsItem
+from ..optimization.detector_optimizer import DetectorStrategyOptimizer
+from ..optimization.generator_optimizer import GeneratorStrategyOptimizer
+from ..scoring.metrics import RoundScore, ScoreCalculator
+from ..utils.ids import IdGenerator
+from ..utils.logging import get_logger
+from ..utils.parsing import coerce_int, flatten_list
+
+logger = get_logger(__name__)
+
+OpinionCallback = Callable[[UserAgent, NewsItem], str]
+
+
+@dataclass(slots=True)
+class RoundResult:
+    news_item: NewsItem
+    opinions: List[str]
+    propagation_history: List[List[str]]
+    infected_users: List[str]
+    detector_payload: Dict[str, object]
+    score: RoundScore
+
+
+class SimulationOrchestrator:
+    def __init__(
+        self,
+        generator: GeneratorAgent,
+        detector: DetectorAgent,
+        community: Dict[str, UserAgent],
+        graph: CommunityGraph,
+        *,
+        score_calculator: Optional[ScoreCalculator] = None,
+        opinion_callback: Optional[OpinionCallback] = None,
+        propagation_rounds: int = 1,
+        generator_optimizer: Optional[GeneratorStrategyOptimizer] = None,
+        detector_optimizer: Optional[DetectorStrategyOptimizer] = None,
+    ) -> None:
+        self._generator = generator
+        self._detector = detector
+        self._community = community
+        self._graph = graph
+        self._score_calculator = score_calculator or ScoreCalculator()
+        self._opinion_callback = opinion_callback
+        self._id_gen = IdGenerator(prefix="news")
+        self._base_propagation_rounds = max(1, propagation_rounds)
+        self._generator_optimizer = generator_optimizer
+        self._detector_optimizer = detector_optimizer
+
+    def simulate_round(
+        self,
+        original_news: str,
+        *,
+        ground_truth: int,
+        seed_users: Sequence[str],
+        strategy_hint: Optional[str] = None,
+        propagation_rounds: Optional[int] = None,
+    ) -> RoundResult:
+        news_id = self._id_gen.next()
+        generator_strategy = strategy_hint or (
+            self._generator_optimizer.suggest() if self._generator_optimizer else None
+        )
+        generation_payload = self._generator.generate(original_news, strategy_hint=generator_strategy)
+        modified_news = generation_payload.get("modified_news", original_news)
+        operation_log = generation_payload.get("operation_log")
+        raw_generation = generation_payload.get("raw_output")
+
+        news_item = NewsItem(
+            news_id=news_id,
+            original_text=original_news,
+            generated_text=str(modified_news),
+            operation_log=operation_log,
+            generator_strategy=generator_strategy,
+            raw_generation=raw_generation,
+        )
+        logger.info("Generated news %s", news_id)
+
+        rounds = propagation_rounds or self._base_propagation_rounds
+        propagation_history, infected_users = self._propagate(news_item, seed_users, rounds)
+        news_item.propagation_history = propagation_history
+        news_item.infected_users = sorted(infected_users)
+
+        opinions = self._gather_opinions(news_item)
+        news_item.opinions = opinions
+
+        detector_strategy = self._detector_optimizer.suggest() if self._detector_optimizer else None
+        detector_result = self._detector.detect(
+            news_item.generated_text or news_item.original_text,
+            opinions,
+            strategy_hint=detector_strategy,
+        )
+        authenticity = coerce_int(detector_result.get("authenticity", 0))
+        news_item.detector_strategy = detector_strategy
+        news_item.raw_detection = detector_result.get("raw_output") if isinstance(detector_result, dict) else None
+
+        score = self._score_calculator.score(
+            detector_label=authenticity,
+            ground_truth=ground_truth,
+            infected_users=len(infected_users),
+            total_users=len(self._community),
+        )
+
+        self._update_experience(news_item, authenticity, opinions)
+        self._update_optimizers(generator_strategy, detector_strategy, score)
+
+        return RoundResult(
+            news_item=news_item,
+            opinions=opinions,
+            propagation_history=propagation_history,
+            infected_users=sorted(infected_users),
+            detector_payload=detector_result if isinstance(detector_result, dict) else {"raw": detector_result},
+            score=score,
+        )
+
+    def _propagate(
+        self,
+        news_item: NewsItem,
+        seed_users: Sequence[str],
+        rounds: int,
+    ) -> Tuple[List[List[str]], Set[str]]:
+        history: List[List[str]] = []
+        frontier: Set[str] = set(seed_users)
+        visited: Set[str] = set()
+        infected: Set[str] = set(frontier)
+        depth = 0
+        while frontier and depth < rounds:
+            history.append(sorted(frontier))
+            belief_delta = max(0.1, 0.4 - depth * 0.1)
+            next_frontier: Set[str] = set()
+            for user_id in frontier:
+                user = self._community[user_id]
+                user.receive_news(news_item.news_id, news_item.generated_text or news_item.original_text, belief_delta)
+                neighbours = self._graph.neighbours(user_id)
+                targets = user.propagate_targets(neighbours)
+                for target_id in targets:
+                    if target_id in infected or target_id == user_id:
+                        continue
+                    target = self._community[target_id]
+                    target.receive_news(
+                        news_item.news_id,
+                        news_item.generated_text or news_item.original_text,
+                        max(0.05, belief_delta - 0.1),
+                    )
+                    next_frontier.add(target_id)
+                    infected.add(target_id)
+            visited.update(frontier)
+            frontier = next_frontier - visited
+            depth += 1
+        return history, infected
+
+    def _gather_opinions(self, news_item: NewsItem) -> List[str]:
+        if self._opinion_callback is None:
+            return []
+        opinions: List[str] = []
+        for user in self._community.values():
+            if news_item.news_id in user.state.inbox:
+                try:
+                    opinion = self._opinion_callback(user, news_item)
+                except Exception as exc:  # pragma: no cover - logging guard
+                    logger.warning("Opinion callback failed: %s", exc)
+                    continue
+                opinions.append(opinion)
+        return opinions
+
+    def _update_experience(self, news_item: NewsItem, detector_label: int, opinions: Sequence[str]) -> None:
+        rationale = flatten_list(opinions)
+        for user in self._community.values():
+            if news_item.news_id not in user.state.inbox:
+                continue
+            experience = Experience(
+                news_id=news_item.news_id,
+                verdict=detector_label,
+                rationale=rationale,
+                strategies=(news_item.operation_log,) if news_item.operation_log else (),
+            )
+            user.reinforce(experience)
+
+    def _update_optimizers(
+        self,
+        generator_strategy: Optional[str],
+        detector_strategy: Optional[str],
+        score: RoundScore,
+    ) -> None:
+        if self._generator_optimizer and generator_strategy:
+            succeeded = score.generator.detection_evasion >= 100.0
+            self._generator_optimizer.update(generator_strategy, success=succeeded)
+        if self._detector_optimizer and detector_strategy:
+            self._detector_optimizer.update(detector_strategy, accuracy=score.detector.total)

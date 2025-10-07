@@ -1,0 +1,35 @@
+"""Experience storage and retrieval for user agents."""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, List, Tuple
+
+
+@dataclass(slots=True)
+class Experience:
+    """Structured memory entry."""
+
+    news_id: str
+    verdict: int
+    rationale: str
+    strategies: Iterable[str] = field(default_factory=tuple)
+
+
+class ExperienceRepository:
+    """In-memory store; can be swapped for persistent backend."""
+
+    def __init__(self) -> None:
+        self._store: Dict[str, List[Experience]] = {}
+
+    def add(self, user_id: str, experience: Experience) -> None:
+        self._store.setdefault(user_id, []).append(experience)
+
+    def get(self, user_id: str) -> List[Experience]:
+        return list(self._store.get(user_id, ()))
+
+    def latest(self, user_id: str, limit: int = 3) -> List[Experience]:
+        experiences = self._store.get(user_id, [])
+        return experiences[-limit:]
+
+    def as_training_pairs(self, user_id: str) -> List[Tuple[str, int]]:
+        return [(exp.rationale, exp.verdict) for exp in self._store.get(user_id, [])]
