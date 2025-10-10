@@ -23,8 +23,14 @@ class UserAgent:
         self._experience_repo = experience_repo or ExperienceRepository()
 
     def receive_news(self, news_id: str, content: str, belief_delta: float) -> None:
-        self.state.inbox.append(news_id)
-        self.state.belief.belief_strength = max(0.0, min(1.0, self.state.belief.belief_strength + belief_delta))
+        if news_id not in self.state.inbox:
+            self.state.inbox.append(news_id)
+        self.state.belief.increase_belief(belief_delta)
+
+    def seed_news(self, news_id: str, content: str) -> None:
+        if news_id not in self.state.inbox:
+            self.state.inbox.append(news_id)
+        self.state.belief.set_belief(1.0)
 
     def ready_to_propagate(self) -> bool:
         return self.state.belief.ready_to_propagate()
@@ -33,6 +39,11 @@ class UserAgent:
         if not self.ready_to_propagate():
             return []
         return list(neighbours)
+
+    def apply_detection_feedback(self, news_id: str, verdict: int) -> None:
+        self.state.belief.integrate_detection_feedback(verdict)
+        if verdict == 1 and news_id in self.state.inbox:
+            self.state.inbox.remove(news_id)
 
     def reinforce(self, experience: Experience) -> None:
         self._experience_repo.add(self.state.persona.user_id, experience)

@@ -26,7 +26,7 @@ def main() -> None:
     edges = [("u0", "u1"), ("u1", "u2"), ("u2", "u3"), ("u3", "u4"), ("u4", "u5"), ("u1", "u3"), ("u2", "u4"), ("u0", "u2")]
 
     base_url = os.getenv("OPENAI_BASE_URL")
-    model_name = "gpt-3.5-turbo-0125"
+    model_name = "gpt-4o-2024-05-13"
 
     generator_cfg = GeneratorAgentConfig(
         name="generator",
@@ -49,18 +49,32 @@ def main() -> None:
         opinion_callback=default_opinion_callback,
         propagation_rounds=5,
     )
-    result = orchestrator.simulate_round(
-        "Scientists discover water on Mars again amid growing debates.",
-        ground_truth=0,
-        seed_users=["u0"],
-    )
-    print("Generated news:", result.news_item.generated_text)
-    print("Propagation history:", result.propagation_history)
-    print("Infected users:", result.infected_users)
-    print("Opinions:", result.opinions)
-    print("Detector payload:", result.detector_payload)
-    print("Score - Generator:", result.score.generator)
-    print("Score - Detector:", result.score.detector)
+
+    simulation_rounds = [
+        {"news": "Scientists discover water on Mars again amid growing debates.", "ground_truth": 1},
+        {"news": "WHO confirms a global eradication of polio after coordinated vaccination efforts.", "ground_truth": 0},
+        {"news": "Leaked documents reveal plans to move the Great Wall to boost tourism.", "ground_truth": 1},
+        {"news": "Shanghai launches a new high-speed rail link reducing travel time to Beijing to 2 hours.", "ground_truth": 0},
+        {"news": "A startup claims cold fusion generators will power every home by next year.", "ground_truth": 1},
+    ]
+
+    for idx, config in enumerate(simulation_rounds, start=1):
+        result = orchestrator.simulate_round(
+            config["news"],
+            ground_truth=config["ground_truth"],
+            seed_users=["u0"],
+        )
+        print(f"=== Round {idx} ===")
+        print("News:", config["news"])
+        print("Ground truth:", config["ground_truth"])
+        print("Generated news:", result.news_item.generated_text)
+        print("Propagation history:", result.propagation_history)
+        print("Infected users:", result.infected_users)
+        print("Opinions:", result.opinions)
+        print("Detector payload:", result.detector_payload)
+        print("Score - Generator:", result.score.generator)
+        print("Score - Detector:", result.score.detector)
+        print()
 
 
 if __name__ == "__main__":

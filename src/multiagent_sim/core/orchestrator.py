@@ -132,6 +132,13 @@ class SimulationOrchestrator:
         frontier: Set[str] = set(seed_users)
         visited: Set[str] = set()
         infected: Set[str] = set(frontier)
+        for seed_id in list(frontier):
+            seed_user = self._community.get(seed_id)
+            if seed_user:
+                seed_user.seed_news(
+                    news_item.news_id,
+                    news_item.generated_text or news_item.original_text,
+                )
         depth = 0
         while frontier and depth < rounds:
             history.append(sorted(frontier))
@@ -184,6 +191,7 @@ class SimulationOrchestrator:
                 strategies=(news_item.operation_log,) if news_item.operation_log else (),
             )
             user.reinforce(experience)
+            user.apply_detection_feedback(news_item.news_id, detector_label)
 
     def _update_optimizers(
         self,
