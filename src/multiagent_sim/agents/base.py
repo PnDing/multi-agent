@@ -18,7 +18,7 @@ except ImportError:  # pragma: no cover
     HARDCODED_OPENAI_BASE_URL = None
 
 PLACEHOLDER_KEY_TOKENS = ("your-openai-key", "sk-xxxxx")
-DEFAULT_MODEL = "gpt-4o-2024-05-13"
+DEFAULT_MODEL = "gpt-4o-mini-2024-07-18"
 
 
 def _sanitize(candidate: Optional[str]) -> Optional[str]:

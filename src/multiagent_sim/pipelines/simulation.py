@@ -1,4 +1,4 @@
-"""High-level builder utilities for running the simulation."""
+﻿"""High-level builder utilities for running the simulation."""
 from __future__ import annotations
 
 from typing import Iterable, Optional, Sequence
@@ -52,3 +52,86 @@ def default_opinion_callback(user: UserAgent, news: NewsItem) -> str:
     experiences = user.recall_experience(limit=1)
     experience_hint = experiences[0].rationale if experiences else "No prior experience"
     return f"{user.state.persona.name} believes {news.news_id} due to {experience_hint}"
+
+# --- Added by patch: belief-based, reasoned opinion callbacks ---
+import re
+from typing import Tuple
+
+
+def _current_reasons_for_user(user: UserAgent, news: NewsItem) -> Tuple[list[str], list[str]]:
+    """Generate current-round supporting/opposing reasons based on news text, persona, and propagation depth.
+    Does not read historical memory to keep opinions timely and grounded in the current round.
+    """
+    text = (news.generated_text or news.original_text or "") or ""
+    low = text.lower()
+    persona = user.state.persona
+
+    pos: list[str] = []
+    neg: list[str] = []
+
+    # Relevance: location / occupation / interests
+    if getattr(persona, "location", None) and persona.location.lower() in low:
+        pos.append(f"it references my city ({persona.location})")
+    else:
+        neg.append("no direct relevance to my location")
+
+    if getattr(persona, "occupation", None) and persona.occupation.lower() in low:
+        pos.append(f"it concerns my profession ({persona.occupation})")
+    else:
+        neg.append("not related to my professional domain")
+
+    interests = getattr(persona, "interests", ()) or ()
+    hits = [kw for kw in interests if isinstance(kw, str) and kw and kw.lower() in low]
+    if hits:
+        pos.append(f"it matches my interests ({', '.join(hits[:3])})")
+    else:
+        neg.append("does not match my personal interests")
+
+    # Authority / specificity heuristics
+    authority_tokens = ("according to", "report", "study", "expert", "research", "who", "cdc")
+    has_authority = any(tok in low for tok in authority_tokens) or ('"' in text)
+    if has_authority:
+        pos.append("it cites authorities or includes quotes")
+    else:
+        neg.append("no verifiable source or quote is cited")
+
+    has_numbers = bool(re.search(r"\d{2,}", text))
+    if has_numbers:
+        pos.append("it provides concrete figures/dates")
+    else:
+        neg.append("lacks concrete numbers or dates")
+
+    # Propagation depth: early exposure feels closer to source; many hops may distort
+    uid = persona.user_id
+    depth = None
+    if news.propagation_history:
+        for i, layer in enumerate(news.propagation_history):
+            if uid in layer:
+                depth = i
+                break
+    if depth is not None:
+        if depth <= 1:
+            pos.append("I saw it early in the cascade (direct/nearby source)")
+        else:
+            neg.append("I only saw it after multiple hops (possible distortion)")
+    else:
+        neg.append("unclear how the news reached me")
+
+    return pos, neg
+
+
+def belief_reason_opinion_callback(user: UserAgent, news: NewsItem) -> str:
+    """Output stance (believes/skeptical) plus current-round reasons derived from content/persona/graph.
+    We use belief vs threshold only to decide the stance, not as the textual reason.
+    """
+    belief = user.state.belief.belief_strength
+    threshold = user.state.belief.propagation_threshold
+    pos, neg = _current_reasons_for_user(user, news)
+
+    believes = belief >= threshold  # used to choose stance only
+    name = user.state.persona.name
+    stance = "believes" if believes else "is skeptical of"
+
+    reasons = (pos if believes else neg) or (neg if believes else pos) or ["insufficient evidence"]
+    reason_text = "; ".join(reasons[:2])
+    return f"{name} {stance} {news.news_id} because {reason_text}"

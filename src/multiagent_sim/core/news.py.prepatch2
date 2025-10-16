@@ -1,4 +1,4 @@
-﻿"""Domain objects representing news items."""
+"""Domain objects representing news items."""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,9 +15,7 @@ class NewsItem:
     opinions: Sequence[str] | None = None
     generator_strategy: Optional[str] = None
     detector_strategy: Optional[str] = None
-    detector_operation_log: Optional[str] = None
     propagation_history: Optional[List[List[str]]] = None
     infected_users: Optional[List[str]] = None
     raw_generation: Optional[str] = None
     raw_detection: Optional[str] = None
-

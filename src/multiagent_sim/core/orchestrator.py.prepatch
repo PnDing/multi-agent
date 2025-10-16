@@ -1,7 +1,5 @@
-﻿"""Round-based simulation orchestrator."""
+"""Round-based simulation orchestrator."""
 from __future__ import annotations
-
-import re
 
 from dataclasses import dataclass
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
@@ -58,7 +56,6 @@ class SimulationOrchestrator:
         self._base_propagation_rounds = max(1, propagation_rounds)
         self._generator_optimizer = generator_optimizer
         self._detector_optimizer = detector_optimizer
-        self._round_index = 0  # round counter
 
     def simulate_round(
         self,
@@ -69,8 +66,6 @@ class SimulationOrchestrator:
         strategy_hint: Optional[str] = None,
         propagation_rounds: Optional[int] = None,
     ) -> RoundResult:
-        self._round_index += 1
-        round_index = self._round_index
         news_id = self._id_gen.next()
         generator_strategy = strategy_hint or (
             self._generator_optimizer.suggest() if self._generator_optimizer else None
@@ -107,7 +102,6 @@ class SimulationOrchestrator:
         authenticity = coerce_int(detector_result.get("authenticity", 0))
         news_item.detector_strategy = detector_strategy
         news_item.raw_detection = detector_result.get("raw_output") if isinstance(detector_result, dict) else None
-        news_item.detector_operation_log = (detector_result.get("operation_log") if isinstance(detector_result, dict) else None)
 
         score = self._score_calculator.score(
             detector_label=authenticity,
@@ -116,7 +110,7 @@ class SimulationOrchestrator:
             total_users=len(self._community),
         )
 
-        self._update_experience(news_item=news_item, detector_label=authenticity, opinions=opinions, ground_truth=ground_truth, round_index=round_index)
+        self._update_experience(news_item, authenticity, opinions)
         self._update_optimizers(generator_strategy, detector_strategy, score)
 
         return RoundResult(
@@ -185,91 +179,20 @@ class SimulationOrchestrator:
                 opinions.append(opinion)
         return opinions
 
-    def _update_experience(
-        self,
-        *,
-        news_item: NewsItem,
-        detector_label: int,
-        opinions: Sequence[str],
-        ground_truth: int,
-        round_index: int,
-    ) -> None:
-        """Write per-user, per-round record (current stance+reason+detector+truth), then apply feedback."""
-        text = (news_item.generated_text or news_item.original_text or "") or ""
-
-        def _reasons_for(user: UserAgent) -> tuple[list[str], list[str], Optional[int]]:
-            low = text.lower()
-            persona = user.state.persona
-            pos: list[str] = []
-            neg: list[str] = []
-            if getattr(persona, "location", None) and persona.location.lower() in low:
-                pos.append(f"it references my city ({persona.location})")
-            else:
-                neg.append("no direct relevance to my location")
-            if getattr(persona, "occupation", None) and persona.occupation.lower() in low:
-                pos.append(f"it concerns my profession ({persona.occupation})")
-            else:
-                neg.append("not related to my professional domain")
-            interests = getattr(persona, "interests", ()) or ()
-            hits = [kw for kw in interests if isinstance(kw, str) and kw and kw.lower() in low]
-            if hits:
-                pos.append(f"it matches my interests ({', '.join(hits[:3])})")
-            else:
-                neg.append("does not match my personal interests")
-            tokens = ("according to", "report", "study", "expert", "research", "who", "cdc")
-            has_auth = any(tok in low for tok in tokens) or ('"' in text)
-            if has_auth:
-                pos.append("it cites authorities or includes quotes")
-            else:
-                neg.append("no verifiable source or quote is cited")
-            if re.search(r"\d{2,}", text):
-                pos.append("it provides concrete figures/dates")
-            else:
-                neg.append("lacks concrete numbers or dates")
-            depth = None
-            if news_item.propagation_history:
-                for i, layer in enumerate(news_item.propagation_history):
-                    if persona.user_id in layer:
-                        depth = i
-                        break
-            if depth is not None:
-                if depth <= 1:
-                    pos.append("I saw it early in the cascade (direct/nearby source)")
-                else:
-                    neg.append("I only saw it after multiple hops (possible distortion)")
-            else:
-                neg.append("unclear how the news reached me")
-            return pos, neg, depth
-
+    def _update_experience(self, news_item: NewsItem, detector_label: int, opinions: Sequence[str]) -> None:
+        rationale = flatten_list(opinions)
         for user in self._community.values():
             if news_item.news_id not in user.state.inbox:
                 continue
-            belief = user.state.belief.belief_strength
-            threshold = user.state.belief.propagation_threshold
-            pos, neg, depth = _reasons_for(user)
-            believes = belief >= threshold
-            stance = "believes" if believes else "is skeptical of"
-            reasons = (pos if believes else neg) or (neg if believes else pos) or ["insufficient evidence"]
-            user_reason = "; ".join(reasons[:2])
-
             experience = Experience(
                 news_id=news_item.news_id,
                 verdict=detector_label,
-                rationale=user_reason,
+                rationale=rationale,
                 strategies=(news_item.operation_log,) if news_item.operation_log else (),
-                user_id=user.state.persona.user_id,
-                news_text=text,
-                user_stance=stance,
-                user_reason=user_reason,
-                detector_verdict=detector_label,
-                detector_reason=news_item.detector_operation_log,
-                ground_truth=ground_truth,
-                round_index=round_index,
-                propagation_depth=depth,
-                generator_operation_log=news_item.operation_log,
             )
             user.reinforce(experience)
             user.apply_detection_feedback(news_item.news_id, detector_label)
+
     def _update_optimizers(
         self,
         generator_strategy: Optional[str],
@@ -281,11 +204,3 @@ class SimulationOrchestrator:
             self._generator_optimizer.update(generator_strategy, success=succeeded)
         if self._detector_optimizer and detector_strategy:
             self._detector_optimizer.update(detector_strategy, accuracy=score.detector.total)
-
-
-
-
-
-
-
-
