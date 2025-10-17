@@ -12,8 +12,6 @@ class NewsItem:
     generated_text: Optional[str] = None
     operation_log: Optional[str] = None
     factuality_label: Optional[int] = None
-    original_truth_label: Optional[int] = None
-    rewrite_applied: Optional[bool] = None
     opinions: Sequence[str] | None = None
     generator_strategy: Optional[str] = None
     detector_strategy: Optional[str] = None
@@ -22,5 +20,4 @@ class NewsItem:
     infected_users: Optional[List[str]] = None
     raw_generation: Optional[str] = None
     raw_detection: Optional[str] = None
-
 

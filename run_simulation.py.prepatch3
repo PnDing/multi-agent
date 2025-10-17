@@ -1,6 +1,5 @@
 ﻿"""Minimal entrypoint demonstrating the simulation framework."""
 from __future__ import annotations
-import random
 
 import os
 import sys
@@ -27,7 +26,7 @@ def main() -> None:
     edges = [("u0", "u1"), ("u1", "u2"), ("u2", "u3"), ("u3", "u4"), ("u4", "u5"), ("u1", "u3"), ("u2", "u4"), ("u0", "u2")]
 
     base_url = os.getenv("OPENAI_BASE_URL")
-    model_name = "gpt-4o-2024-05-13"
+    model_name = "gpt-4o-mini-2024-07-18"
 
     generator_cfg = GeneratorAgentConfig(
         name="generator",
@@ -52,32 +51,22 @@ def main() -> None:
     )
 
     simulation_rounds = [
-        {"news": "Scientists discover water on Mars again amid growing debates."},
-        {"news": "WHO confirms a global eradication of polio after coordinated vaccination efforts."},
-        {"news": "Leaked documents reveal plans to move the Great Wall to boost tourism."},
-        {"news": "Shanghai launches a new high-speed rail link reducing travel time to Beijing to 2 hours."},
-        {"news": "A startup claims cold fusion generators will power every home by next year."},
+        {"news": "Scientists discover water on Mars again amid growing debates.", "ground_truth": 1},
+        {"news": "WHO confirms a global eradication of polio after coordinated vaccination efforts.", "ground_truth": 0},
+        {"news": "Leaked documents reveal plans to move the Great Wall to boost tourism.", "ground_truth": 1},
+        {"news": "Shanghai launches a new high-speed rail link reducing travel time to Beijing to 2 hours.", "ground_truth": 0},
+        {"news": "A startup claims cold fusion generators will power every home by next year.", "ground_truth": 1},
     ]
 
-    rewrite_probability = 0.5
-
     for idx, config in enumerate(simulation_rounds, start=1):
-        apply_rewrite = random.random() < rewrite_probability
-        ground_truth_raw = 0
-        ground_truth_final = 1 if apply_rewrite else 0
-
         result = orchestrator.simulate_round(
             config["news"],
-            ground_truth_raw=ground_truth_raw,
-            ground_truth_final=ground_truth_final,
+            ground_truth=config["ground_truth"],
             seed_users=["u0"],
-            rewrite=apply_rewrite,
         )
         print(f"=== Round {idx} ===")
         print("News:", config["news"])
-        print("Rewrite applied:", apply_rewrite)
-        print("Ground truth (raw):", ground_truth_raw)
-        print("Ground truth (final):", ground_truth_final)
+        print("Ground truth:", config["ground_truth"])
         print("Generated news:", result.news_item.generated_text)
         print("Propagation history:", result.propagation_history)
         print("Infected users:", result.infected_users)
@@ -90,7 +79,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-
-
 

@@ -17,7 +17,7 @@ from ..optimization.generator_optimizer import GeneratorStrategyOptimizer
 from ..scoring.metrics import RoundScore, ScoreCalculator
 from ..utils.ids import IdGenerator
 from ..utils.logging import get_logger
-from ..utils.parsing import coerce_int
+from ..utils.parsing import coerce_int, flatten_list
 
 logger = get_logger(__name__)
 
@@ -32,9 +32,6 @@ class RoundResult:
     infected_users: List[str]
     detector_payload: Dict[str, object]
     score: RoundScore
-    ground_truth_raw: int
-    ground_truth_final: int
-    rewrite_applied: bool
 
 
 class SimulationOrchestrator:
@@ -67,32 +64,21 @@ class SimulationOrchestrator:
         self,
         original_news: str,
         *,
-        ground_truth_raw: int,
-        ground_truth_final: int,
+        ground_truth: int,
         seed_users: Sequence[str],
-        rewrite: bool = True,
         strategy_hint: Optional[str] = None,
         propagation_rounds: Optional[int] = None,
     ) -> RoundResult:
         self._round_index += 1
         round_index = self._round_index
         news_id = self._id_gen.next()
-
-        generator_strategy: Optional[str] = None
-        modified_news = original_news
-        operation_log = None
-        raw_generation = None
-
-        if rewrite:
-            generator_strategy = strategy_hint or (
-                self._generator_optimizer.suggest() if self._generator_optimizer else None
-            )
-            generation_payload = self._generator.generate(original_news, strategy_hint=generator_strategy)
-            modified_news = generation_payload.get("modified_news", original_news)
-            operation_log = generation_payload.get("operation_log")
-            raw_generation = generation_payload.get("raw_output")
-        else:
-            generation_payload = {}
+        generator_strategy = strategy_hint or (
+            self._generator_optimizer.suggest() if self._generator_optimizer else None
+        )
+        generation_payload = self._generator.generate(original_news, strategy_hint=generator_strategy)
+        modified_news = generation_payload.get("modified_news", original_news)
+        operation_log = generation_payload.get("operation_log")
+        raw_generation = generation_payload.get("raw_output")
 
         news_item = NewsItem(
             news_id=news_id,
@@ -102,9 +88,6 @@ class SimulationOrchestrator:
             generator_strategy=generator_strategy,
             raw_generation=raw_generation,
         )
-        news_item.factuality_label = ground_truth_final
-        news_item.original_truth_label = ground_truth_raw
-        news_item.rewrite_applied = rewrite
         logger.info("Generated news %s", news_id)
 
         rounds = propagation_rounds or self._base_propagation_rounds
@@ -128,19 +111,12 @@ class SimulationOrchestrator:
 
         score = self._score_calculator.score(
             detector_label=authenticity,
-            ground_truth=ground_truth_final,
+            ground_truth=ground_truth,
             infected_users=len(infected_users),
             total_users=len(self._community),
         )
 
-        self._update_experience(
-            news_item=news_item,
-            detector_label=authenticity,
-            opinions=opinions,
-            ground_truth_final=ground_truth_final,
-            ground_truth_raw=ground_truth_raw,
-            round_index=round_index,
-        )
+        self._update_experience(news_item=news_item, detector_label=authenticity, opinions=opinions, ground_truth=ground_truth, round_index=round_index)
         self._update_optimizers(generator_strategy, detector_strategy, score)
 
         return RoundResult(
@@ -150,9 +126,6 @@ class SimulationOrchestrator:
             infected_users=sorted(infected_users),
             detector_payload=detector_result if isinstance(detector_result, dict) else {"raw": detector_result},
             score=score,
-            ground_truth_raw=ground_truth_raw,
-            ground_truth_final=ground_truth_final,
-            rewrite_applied=rewrite,
         )
 
     def _propagate(
@@ -218,8 +191,7 @@ class SimulationOrchestrator:
         news_item: NewsItem,
         detector_label: int,
         opinions: Sequence[str],
-        ground_truth_final: int,
-        ground_truth_raw: int,
+        ground_truth: int,
         round_index: int,
     ) -> None:
         """Write per-user, per-round record (current stance+reason+detector+truth), then apply feedback."""
@@ -291,8 +263,7 @@ class SimulationOrchestrator:
                 user_reason=user_reason,
                 detector_verdict=detector_label,
                 detector_reason=news_item.detector_operation_log,
-                ground_truth=ground_truth_final,
-                ground_truth_raw=ground_truth_raw,
+                ground_truth=ground_truth,
                 round_index=round_index,
                 propagation_depth=depth,
                 generator_operation_log=news_item.operation_log,
@@ -310,17 +281,6 @@ class SimulationOrchestrator:
             self._generator_optimizer.update(generator_strategy, success=succeeded)
         if self._detector_optimizer and detector_strategy:
             self._detector_optimizer.update(detector_strategy, accuracy=score.detector.total)
-
-
-
-
-
-
-
-
-
-
-
 
 
 

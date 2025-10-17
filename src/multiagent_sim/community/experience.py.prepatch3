@@ -20,8 +20,7 @@ class Experience:
     user_reason: Optional[str] = None            # current-round personal reason
     detector_verdict: Optional[int] = None       # 0 real / 1 fake
     detector_reason: Optional[str] = None        # detector operation/evidence summary
-    ground_truth: Optional[int] = None           # 0 real / 1 fake (final)
-    ground_truth_raw: Optional[int] = None      # original article truth
+    ground_truth: Optional[int] = None           # 0 real / 1 fake
     round_index: Optional[int] = None            # round number
     propagation_depth: Optional[int] = None      # hop depth in this round
     generator_operation_log: Optional[str] = None
@@ -45,4 +44,3 @@ class ExperienceRepository:
 
     def as_training_pairs(self, user_id: str) -> List[Tuple[str, int]]:
         return [(exp.rationale, exp.verdict) for exp in self._store.get(user_id, [])]
-
