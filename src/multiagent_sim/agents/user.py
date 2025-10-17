@@ -22,6 +22,7 @@ class UserAgent:
     def __init__(self, persona: Persona, belief: Optional[BeliefProfile] = None, *, experience_repo: Optional[ExperienceRepository] = None) -> None:
         self.state = UserAgentState(persona=persona, belief=belief or BeliefProfile())
         self._experience_repo = experience_repo or ExperienceRepository()
+        self._role = getattr(persona, "role", "bystander") or "bystander"
         self._rng = random.Random(hash(persona.user_id) & 0xFFFFFFFF)
 
     def receive_news(self, news_id: str, content: str, belief_delta: float) -> None:
@@ -33,8 +34,17 @@ class UserAgent:
         agreeableness = getattr(persona, "agreeableness", 0.5)
         neuroticism = getattr(persona, "neuroticism", 0.5)
         skepticism = self.state.belief.skepticism
+        role = self._role
         modifier = 0.6 + 0.4 * openness - 0.3 * conscientiousness + 0.25 * neuroticism + 0.15 * (agreeableness - 0.5)
         modifier *= 1.0 - 0.4 * skepticism
+        if role == "broadcaster":
+            modifier *= 1.25
+        elif role == "commentator":
+            modifier *= 1.05
+        elif role == "verifier":
+            modifier *= 0.7
+        elif role == "bystander":
+            modifier *= 0.6
         modifier = max(0.15, min(1.75, modifier))
         adjusted_delta = belief_delta * modifier
         self.state.belief.increase_belief(adjusted_delta)
@@ -42,8 +52,16 @@ class UserAgent:
     def seed_news(self, news_id: str, content: str) -> None:
         if news_id not in self.state.inbox:
             self.state.inbox.append(news_id)
-        baseline = 0.8 + getattr(self.state.persona, "extraversion", 0.5) * 0.2
-        self.state.belief.set_belief(min(1.0, max(0.95, baseline)))
+        persona = self.state.persona
+        role = self._role
+        baseline = 0.8 + getattr(persona, "extraversion", 0.5) * 0.2
+        if role == "verifier":
+            baseline *= 0.85
+        elif role == "bystander":
+            baseline *= 0.75
+        elif role == "broadcaster":
+            baseline *= 1.05
+        self.state.belief.set_belief(min(1.0, max(0.6, baseline)))
 
     def ready_to_propagate(self) -> bool:
         return self.state.belief.ready_to_propagate()
@@ -55,10 +73,24 @@ class UserAgent:
         if not neighbour_list:
             return []
         persona = self.state.persona
+        role = self._role
+        belief_strength = self.state.belief.belief_strength
         extraversion = getattr(persona, "extraversion", 0.5)
         conscientiousness = getattr(persona, "conscientiousness", 0.5)
         agreeableness = getattr(persona, "agreeableness", 0.5)
         share_ratio = 0.25 + extraversion * 0.6 - conscientiousness * 0.2 + (agreeableness - 0.5) * 0.1
+        if role == "broadcaster":
+            share_ratio += 0.25
+        elif role == "commentator":
+            share_ratio += 0.1
+        elif role == "verifier":
+            if belief_strength < 0.75:
+                return []
+            share_ratio *= 0.6
+        elif role == "bystander":
+            if belief_strength < 0.95:
+                return []
+            share_ratio *= 0.4
         share_ratio = max(0.1, min(1.0, share_ratio))
         share_count = max(1, int(round(len(neighbour_list) * share_ratio)))
         self._rng.shuffle(neighbour_list)
@@ -69,18 +101,34 @@ class UserAgent:
 
     def apply_detection_feedback(self, news_id: str, verdict: int) -> None:
         persona = self.state.persona
+        role = self._role
         self.state.belief.integrate_detection_feedback(verdict)
-        adjust = 0.08 + getattr(persona, "conscientiousness", 0.5) * 0.18
+        base_adjust = 0.08 + getattr(persona, "conscientiousness", 0.5) * 0.18
+        if role == "broadcaster":
+            adjust = base_adjust * 1.2
+        elif role == "verifier":
+            adjust = base_adjust * 1.4
+        else:
+            adjust = base_adjust
         if verdict == 1:
             self.state.belief.belief_strength = max(0.0, self.state.belief.belief_strength - adjust)
-            threshold_boost = adjust * (0.5 + getattr(persona, "neuroticism", 0.5) * 0.5)
+            threshold_boost = adjust * (0.4 + getattr(persona, "neuroticism", 0.5) * 0.6)
+            if role == "verifier":
+                threshold_boost *= 1.2
             self.state.belief.propagation_threshold = min(1.3, self.state.belief.propagation_threshold + threshold_boost)
             if news_id in self.state.inbox:
                 self.state.inbox.remove(news_id)
         else:
-            reward = adjust * (0.4 + getattr(persona, "agreeableness", 0.5) * 0.3)
+            reward = adjust * (0.35 + getattr(persona, "agreeableness", 0.5) * 0.35)
+            if role == "commentator":
+                reward *= 1.15
+            elif role == "bystander":
+                reward *= 0.8
             self.state.belief.belief_strength = min(1.0, self.state.belief.belief_strength + reward)
-            self.state.belief.propagation_threshold = max(0.3, self.state.belief.propagation_threshold - reward * (0.5 + getattr(persona, "extraversion", 0.5) * 0.4))
+            threshold_drop = reward * (0.5 + getattr(persona, "extraversion", 0.5) * 0.4)
+            if role == "verifier":
+                threshold_drop *= 0.7
+            self.state.belief.propagation_threshold = max(0.3, self.state.belief.propagation_threshold - threshold_drop)
 
     def reinforce(self, experience: Experience) -> None:
         self._experience_repo.add(self.state.persona.user_id, experience)

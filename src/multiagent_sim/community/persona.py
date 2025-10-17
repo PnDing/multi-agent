@@ -18,6 +18,7 @@ class Persona:
     education: str
     interests: Sequence[str] = field(default_factory=tuple)
     media_preferences: Sequence[str] = field(default_factory=tuple)
+    role: str = "bystander"
     political_tendency: str = "neutral"
     openness: float = 0.5
     conscientiousness: float = 0.5

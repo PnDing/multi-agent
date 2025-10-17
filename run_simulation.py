@@ -24,6 +24,7 @@ from multiagent_sim.data.persona_catalog import (
     sample_interests,
     sample_media_preferences,
     sample_personality,
+    sample_role,
 )
 from multiagent_sim.pipelines.simulation import build_default_orchestrator, belief_reason_opinion_callback
 
@@ -49,6 +50,7 @@ def generate_personas(count: int, *, seed: int = 42) -> List[Persona]:
             education=rng.choice(EDUCATION_OPTIONS),
             interests=sample_interests(rng=rng),
             media_preferences=sample_media_preferences(rng=rng),
+            role=sample_role(archetype, rng=rng),
             openness=personality["openness"],
             conscientiousness=personality["conscientiousness"],
             extraversion=personality["extraversion"],
@@ -61,6 +63,9 @@ def generate_personas(count: int, *, seed: int = 42) -> List[Persona]:
 
 def main() -> None:
     personas = generate_personas(6, seed=42)
+    print("Persona roster:")
+    for persona in personas:
+        print(f"  {persona.user_id} [{persona.role}] - age {persona.age}, city {persona.location}, occupation {persona.occupation}; O={persona.openness:.2f}, C={persona.conscientiousness:.2f}, E={persona.extraversion:.2f}, A={persona.agreeableness:.2f}, N={persona.neuroticism:.2f}")
     edges = [("u0", "u1"), ("u1", "u2"), ("u2", "u3"), ("u3", "u4"), ("u4", "u5"), ("u1", "u3"), ("u2", "u4"), ("u0", "u2")]
 
     base_url = os.getenv("OPENAI_BASE_URL")

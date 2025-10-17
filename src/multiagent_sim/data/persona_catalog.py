@@ -89,3 +89,32 @@ def sample_media_preferences(*, rng, k: int = 2) -> Sequence[str]:
 def sample_personality(archetype: str, *, rng) -> Dict[str, float]:
     ranges = PERSONALITY_ARCHETYPES[archetype]
     return {trait: rng.uniform(r.low, r.high) for trait, r in ranges.items()}
+
+
+ROLE_POOL = ("broadcaster", "commentator", "verifier", "bystander")
+
+ROLE_DISTRIBUTION: Dict[str, Tuple[Tuple[str, float], ...]] = {
+    "broadcaster": (("broadcaster", 0.7), ("commentator", 0.2), ("bystander", 0.1)),
+    "advocate": (("commentator", 0.5), ("broadcaster", 0.3), ("verifier", 0.1), ("bystander", 0.1)),
+    "skeptic": (("verifier", 0.5), ("bystander", 0.3), ("commentator", 0.1), ("broadcaster", 0.1)),
+}
+
+DEFAULT_ROLE_WEIGHTS: Tuple[Tuple[str, float], ...] = (
+    ("broadcaster", 0.3),
+    ("commentator", 0.3),
+    ("verifier", 0.2),
+    ("bystander", 0.2),
+)
+
+
+def sample_role(archetype: str, *, rng) -> str:
+    weighted = ROLE_DISTRIBUTION.get(archetype, DEFAULT_ROLE_WEIGHTS)
+    roles, weights = zip(*weighted)
+    total = sum(weights)
+    pick = rng.random() * total
+    cumulative = 0.0
+    for role, weight in weighted:
+        cumulative += weight
+        if pick <= cumulative:
+            return role
+    return roles[-1]

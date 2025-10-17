@@ -161,6 +161,16 @@ def _current_reasons_for_user(user: UserAgent, news: NewsItem) -> Tuple[list[str
     elif getattr(persona, "neuroticism", 0.5) <= 0.3:
         neg.append("it does not worry me enough to act")
 
+    role = getattr(persona, "role", "bystander")
+    if role == "broadcaster":
+        pos.append("amplifying the story keeps everyone alert")
+    elif role == "commentator":
+        pos.append("I want to share my take on this news")
+    elif role == "verifier":
+        neg.append("I prefer to verify before endorsing it")
+    elif role == "bystander":
+        neg.append("I mostly observe unless it proves critical")
+
     return pos, neg
 
 
@@ -173,9 +183,17 @@ def belief_reason_opinion_callback(user: UserAgent, news: NewsItem) -> str:
     pos, neg = _current_reasons_for_user(user, news)
 
     believes = belief >= threshold  # used to choose stance only
-    name = user.state.persona.name
+    persona = user.state.persona
+    role = getattr(persona, "role", "bystander")
+    name = persona.name
     stance = "believes" if believes else "is skeptical of"
 
     reasons = (pos if believes else neg) or (neg if believes else pos) or ["insufficient evidence"]
     reason_text = "; ".join(reasons[:2])
-    return f"{name} {stance} {news.news_id} because {reason_text}"
+    role_tag = {
+        "broadcaster": "speaking as a broadcaster",
+        "commentator": "weighing in as a commentator",
+        "verifier": "reviewing it as a verifier",
+        "bystander": "sharing cautiously as a bystander",
+    }.get(role, "sharing my perspective")
+    return f"{name} {stance} {news.news_id} because {reason_text} ({role_tag})"
