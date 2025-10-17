@@ -16,23 +16,6 @@ from ..optimization.generator_optimizer import GeneratorStrategyOptimizer
 from ..scoring.metrics import ScoreCalculator
 
 
-
-
-def _clamp(value: float, low: float, high: float) -> float:
-    return max(low, min(high, value))
-
-
-def _initial_belief_from_persona(persona: Persona) -> BeliefProfile:
-    base_belief = _clamp(0.1 + persona.openness * 0.3 + persona.extraversion * 0.2 - persona.conscientiousness * 0.2, 0.0, 0.7)
-    skepticism = _clamp(0.45 + (0.5 - persona.openness) * 0.35 + (0.5 - persona.agreeableness) * 0.25 + persona.neuroticism * 0.25, 0.05, 0.95)
-    threshold = _clamp(0.85 + (0.5 - persona.extraversion) * 0.5 + persona.conscientiousness * 0.3 - persona.agreeableness * 0.1, 0.4, 1.2)
-    return BeliefProfile(
-        belief_strength=base_belief,
-        skepticism=skepticism,
-        propagation_threshold=threshold,
-    )
-
-
 def build_default_orchestrator(
     personas: Sequence[Persona],
     edges: Iterable[tuple[str, str]],
@@ -48,8 +31,7 @@ def build_default_orchestrator(
     generator = AgentFactory.build_generator(generator_config)
     detector = AgentFactory.build_detector(detector_config)
     community = {
-        persona.user_id: UserAgent(persona, belief=_initial_belief_from_persona(persona))
-        for persona in personas
+        persona.user_id: UserAgent(persona, belief=BeliefProfile()) for persona in personas
     }
     graph = CommunityGraph()
     graph.ingest_edges(edges)
@@ -134,32 +116,6 @@ def _current_reasons_for_user(user: UserAgent, news: NewsItem) -> Tuple[list[str
             neg.append("I only saw it after multiple hops (possible distortion)")
     else:
         neg.append("unclear how the news reached me")
-
-    # Personality-driven heuristics
-    if getattr(persona, "openness", 0.5) >= 0.7:
-        pos.append("I enjoy exploring novel ideas")
-    elif getattr(persona, "openness", 0.5) <= 0.3:
-        neg.append("too unconventional for my taste")
-
-    if getattr(persona, "conscientiousness", 0.5) >= 0.7:
-        neg.append("I prefer to verify facts before accepting them")
-    elif getattr(persona, "conscientiousness", 0.5) <= 0.3:
-        pos.append("I trust my intuition even without full evidence")
-
-    if getattr(persona, "extraversion", 0.5) >= 0.7:
-        pos.append("people around me are excited about it")
-    elif getattr(persona, "extraversion", 0.5) <= 0.3:
-        neg.append("I tend to observe quietly before engaging")
-
-    if getattr(persona, "agreeableness", 0.5) >= 0.7:
-        pos.append("I want to align with others to maintain harmony")
-    elif getattr(persona, "agreeableness", 0.5) <= 0.3:
-        neg.append("I naturally question others' intentions")
-
-    if getattr(persona, "neuroticism", 0.5) >= 0.7:
-        pos.append("it triggers serious concerns I cannot ignore")
-    elif getattr(persona, "neuroticism", 0.5) <= 0.3:
-        neg.append("it does not worry me enough to act")
 
     return pos, neg
 

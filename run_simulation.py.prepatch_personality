@@ -1,11 +1,10 @@
-"""Minimal entrypoint demonstrating the simulation framework."""
+﻿"""Minimal entrypoint demonstrating the simulation framework."""
 from __future__ import annotations
+import random
 
 import os
-import random
 import sys
 from pathlib import Path
-from typing import List
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 sys.path.append(str(PROJECT_ROOT / "src"))
@@ -13,54 +12,18 @@ sys.path.append(str(PROJECT_ROOT / "src"))
 from multiagent_sim.agents.generator import GeneratorAgentConfig, GENERATOR_PROMPT
 from multiagent_sim.agents.detector import DetectorAgentConfig, DETECTOR_PROMPT
 from multiagent_sim.community.persona import Persona
-from multiagent_sim.data.persona_catalog import (
-    ARCHETYPE_DISTRIBUTION,
-    CANDIDATE_NAMES,
-    CITY_OPTIONS,
-    EDUCATION_OPTIONS,
-    GENDER_OPTIONS,
-    OCCUPATION_OPTIONS,
-    sample_age,
-    sample_interests,
-    sample_media_preferences,
-    sample_personality,
-)
 from multiagent_sim.pipelines.simulation import build_default_orchestrator, belief_reason_opinion_callback
 
 
-def generate_personas(count: int, *, seed: int = 42) -> List[Persona]:
-    rng = random.Random(seed)
-    available_names = list(CANDIDATE_NAMES)
-    rng.shuffle(available_names)
-    if count > len(available_names):
-        raise ValueError(f"Requested {count} personas but only {len(available_names)} names available")
-    personas: List[Persona] = []
-    archetypes = list(ARCHETYPE_DISTRIBUTION)
-    for idx in range(count):
-        archetype = archetypes[idx % len(archetypes)]
-        personality = sample_personality(archetype, rng=rng)
-        persona = Persona(
-            user_id=f"u{idx}",
-            name=available_names[idx],
-            gender=rng.choice(GENDER_OPTIONS),
-            age=sample_age(rng=rng),
-            location=rng.choice(CITY_OPTIONS),
-            occupation=rng.choice(OCCUPATION_OPTIONS),
-            education=rng.choice(EDUCATION_OPTIONS),
-            interests=sample_interests(rng=rng),
-            media_preferences=sample_media_preferences(rng=rng),
-            openness=personality["openness"],
-            conscientiousness=personality["conscientiousness"],
-            extraversion=personality["extraversion"],
-            agreeableness=personality["agreeableness"],
-            neuroticism=personality["neuroticism"],
-        )
-        personas.append(persona)
-    return personas
-
-
 def main() -> None:
-    personas = generate_personas(6, seed=42)
+    personas = [
+        Persona(user_id="u0", name="Alice", gender="female", age=28, location="Beijing", occupation="Journalist", education="Bachelor"),
+        Persona(user_id="u1", name="Bob", gender="male", age=35, location="Shanghai", occupation="Engineer", education="Master"),
+        Persona(user_id="u2", name="Carol", gender="female", age=42, location="Shenzhen", occupation="Teacher", education="Bachelor"),
+        Persona(user_id="u3", name="David", gender="male", age=31, location="Guangzhou", occupation="Data Analyst", education="Master"),
+        Persona(user_id="u4", name="Eve", gender="female", age=29, location="Chengdu", occupation="Content Creator", education="Bachelor"),
+        Persona(user_id="u5", name="Frank", gender="male", age=37, location="Wuhan", occupation="Healthcare Worker", education="Bachelor"),
+    ]
     edges = [("u0", "u1"), ("u1", "u2"), ("u2", "u3"), ("u3", "u4"), ("u4", "u5"), ("u1", "u3"), ("u2", "u4"), ("u0", "u2")]
 
     base_url = os.getenv("OPENAI_BASE_URL")
@@ -97,7 +60,6 @@ def main() -> None:
     ]
 
     rewrite_probability = 0.5
-    random.seed(42)
 
     for idx, config in enumerate(simulation_rounds, start=1):
         apply_rewrite = random.random() < rewrite_probability
