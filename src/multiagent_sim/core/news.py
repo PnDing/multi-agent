@@ -18,6 +18,7 @@ class NewsItem:
     generator_strategy: Optional[str] = None
     detector_strategy: Optional[str] = None
     detector_operation_log: Optional[str] = None
+    generator_sources: Optional[List[str]] = None
     propagation_history: Optional[List[List[str]]] = None
     infected_users: Optional[List[str]] = None
     raw_generation: Optional[str] = None

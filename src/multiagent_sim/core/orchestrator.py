@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from ..agents.detector import DetectorAgent
 from ..agents.generator import GeneratorAgent
@@ -71,7 +71,6 @@ class SimulationOrchestrator:
         ground_truth_final: int,
         seed_users: Sequence[str],
         rewrite: bool = True,
-        strategy_hint: Optional[str] = None,
         propagation_rounds: Optional[int] = None,
     ) -> RoundResult:
         self._round_index += 1
@@ -82,17 +81,16 @@ class SimulationOrchestrator:
         modified_news = original_news
         operation_log = None
         raw_generation = None
+        generation_payload: Dict[str, Any] = {}
 
         if rewrite:
-            generator_strategy = strategy_hint or (
-                self._generator_optimizer.suggest() if self._generator_optimizer else None
-            )
-            generation_payload = self._generator.generate(original_news, strategy_hint=generator_strategy)
+            generation_payload = self._generator.generate(original_news)
             modified_news = generation_payload.get("modified_news", original_news)
             operation_log = generation_payload.get("operation_log")
             raw_generation = generation_payload.get("raw_output")
+            generator_strategy = generation_payload.get("strategy_used") or "unspecified"
         else:
-            generation_payload = {}
+            generator_strategy = "none"
 
         news_item = NewsItem(
             news_id=news_id,
@@ -101,6 +99,7 @@ class SimulationOrchestrator:
             operation_log=operation_log,
             generator_strategy=generator_strategy,
             raw_generation=raw_generation,
+            generator_sources=(generation_payload.get("evidence") if rewrite else None),
         )
         news_item.factuality_label = ground_truth_final
         news_item.original_truth_label = ground_truth_raw
@@ -141,7 +140,8 @@ class SimulationOrchestrator:
             ground_truth_raw=ground_truth_raw,
             round_index=round_index,
         )
-        self._update_optimizers(generator_strategy, detector_strategy, score)
+        optimizer_strategy = generator_strategy if rewrite else None
+        self._update_optimizers(optimizer_strategy, detector_strategy, score)
 
         return RoundResult(
             news_item=news_item,
