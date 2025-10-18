@@ -123,20 +123,12 @@ def main() -> None:
         print("Ground truth (final):", ground_truth_final)
         print("Generated news:", result.news_item.generated_text)
         print("Strategy used:", result.news_item.generator_strategy)
-        print("Prompt digest:", result.generator_prompt_digest)
-        print("Optimizer rationale:", result.generator_prompt_rationale)
         print("Generator operation log:", result.news_item.operation_log)
         print("Generator evidence:", getattr(result.news_item, "generator_sources", None))
         print("Propagation history:", result.propagation_history)
         print("Infected users:", result.infected_users)
         print("Opinions:", result.opinions)
-        detector_payload = result.detector_payload
-        if isinstance(detector_payload, dict) and "raw_output" in detector_payload:
-            compact_payload = dict(detector_payload)
-            compact_payload.pop("raw_output", None)
-        else:
-            compact_payload = detector_payload
-        print("Detector payload:", compact_payload)
+        print("Detector payload:", result.detector_payload)
         print("Score - Generator:", result.score.generator)
         print("Score - Detector:", result.score.detector)
         print()

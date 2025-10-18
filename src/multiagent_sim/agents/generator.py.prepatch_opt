@@ -1,7 +1,7 @@
 """Generator agent implementation backed by LangChain."""
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
 from .base import AgentConfig, build_agent
@@ -18,7 +18,6 @@ class GeneratorAgentConfig(AgentConfig):
 class GeneratorAgent:
     def __init__(self, config: Optional[GeneratorAgentConfig] = None) -> None:
         cfg = config or GeneratorAgentConfig(name="generator", system_prompt=GENERATOR_PROMPT)
-        self._config = cfg
         self._agent = build_agent(cfg)
 
     def generate(self, original_news: str, strategy_hint: Optional[str] = None) -> Dict[str, Any]:
@@ -41,14 +40,3 @@ class GeneratorAgent:
         if not isinstance(parsed.get("evidence"), list):
             parsed["evidence"] = []
         return parsed
-
-    def update_prompt(self, new_system_prompt: str) -> None:
-        """Replace the underlying system prompt used by the generator."""
-        if not new_system_prompt or new_system_prompt.strip() == "":
-            return
-        self._config = replace(self._config, system_prompt=new_system_prompt)
-        self._agent = build_agent(self._config)
-
-    @property
-    def system_prompt(self) -> str:
-        return self._config.system_prompt

@@ -37,9 +37,6 @@ class RoundResult:
     ground_truth_raw: int
     ground_truth_final: int
     rewrite_applied: bool
-    generator_prompt_digest: str
-    generator_prompt_sample: str
-    generator_prompt_rationale: str
 
 
 class SimulationOrchestrator:
@@ -86,7 +83,6 @@ class SimulationOrchestrator:
         self._round_index += 1
         round_index = self._round_index
         news_id = self._id_gen.next()
-        self._latest_optimizer_rationale = ""
 
         if self._generator.system_prompt != self._current_generator_prompt:
             self._generator.update_prompt(self._current_generator_prompt)
@@ -159,9 +155,6 @@ class SimulationOrchestrator:
 
         detector_payload = detector_result if isinstance(detector_result, dict) else {"raw": detector_result}
         generator_success = score.generator.detection_evasion >= 100.0
-        prompt_digest = self._prompt_digest(self._current_generator_prompt)
-        prompt_sample = self._current_generator_prompt[:120]
-        proposal_rationale = getattr(self, "_latest_optimizer_rationale", "")
         self._record_generator_history(
             round_index=round_index,
             prompt=self._current_generator_prompt,
@@ -185,9 +178,6 @@ class SimulationOrchestrator:
             ground_truth_raw=ground_truth_raw,
             ground_truth_final=ground_truth_final,
             rewrite_applied=rewrite,
-            generator_prompt_digest=prompt_digest,
-            generator_prompt_sample=prompt_sample,
-            generator_prompt_rationale=proposal_rationale,
         )
 
     def _propagate(
@@ -277,8 +267,6 @@ class SimulationOrchestrator:
         default_prompt = self._last_successful_prompt or self._fallback_prompt
         proposal = self._strategy_agent.propose(history_for_agent, default_prompt=default_prompt)
         proposed_prompt = proposal.get("next_prompt") or default_prompt
-        rationale = proposal.get("rationale", "")
-        self._latest_optimizer_rationale = rationale
         confidence = proposal.get("confidence", 0.0)
         try:
             confidence_value = float(confidence)
@@ -287,17 +275,7 @@ class SimulationOrchestrator:
         adopt = bool(proposed_prompt.strip())
         if confidence_value < 0.2 and not success:
             adopt = False
-        if adopt:
-            adjustments = proposed_prompt.strip()
-            if adjustments:
-                new_prompt = (
-                    f"{self._fallback_prompt}\n\n"
-                    f"# Optimizer adjustments (round {self._round_index}):\n{adjustments}"
-                )
-            else:
-                new_prompt = self._fallback_prompt
-        else:
-            new_prompt = default_prompt
+        new_prompt = proposed_prompt if adopt else default_prompt
         if not new_prompt.strip():
             new_prompt = self._fallback_prompt
         if self._generator.system_prompt != new_prompt:
