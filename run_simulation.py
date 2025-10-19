@@ -94,11 +94,16 @@ def main() -> None:
     )
 
     simulation_rounds = [
-        {"news": "Scientists discover water on Mars again amid growing debates."},
-        {"news": "WHO confirms a global eradication of polio after coordinated vaccination efforts."},
-        {"news": "Leaked documents reveal plans to move the Great Wall to boost tourism."},
-        {"news": "Shanghai launches a new high-speed rail link reducing travel time to Beijing to 2 hours."},
-        {"news": "A startup claims cold fusion generators will power every home by next year."},
+        {"news": "Donald Trump wins the U.S. presidential election, reshaping global trade, international relations, and climate policy."},
+        {"news": "Syrian opposition forces sweep into Damascus, ending the Assad family’s 53-year rule and dramatically shifting Middle Eastern geopolitics."},
+        {"news": "The Paris 2024 Olympic Games conclude with Team USA topping the gold-medal table, setting new milestones for sustainability and gender equality."},
+        {"news": "Hurricane Milton, one of the strongest Atlantic storms on record, makes landfall in Florida, causing catastrophic destruction and major economic losses."},
+        {"news": "The World Health Organization declares a Public Health Emergency of International Concern over a more transmissible Mpox variant spreading across multiple African nations."},
+        {"news": "Notre-Dame Cathedral reopens to the public five years after the devastating 2019 fire, marking a historic restoration milestone."},
+        {"news": "The European Space Agency launches the Hera probe to survey the double-asteroid system and assess the outcome of humanity’s first asteroid-deflection test."},
+        {"news": "Nationwide student protests against the civil service quota system in Bangladesh escalate into violent clashes, forcing Prime Minister Sheikh Hasina to resign."},
+        {"news": "South Korean President Yoon Suk-yeol announces martial law overnight but rescinds it within hours after unanimous parliamentary opposition and mass protests, triggering a constitutional crisis."},
+        {"news": "The 2024 Nobel Prizes are announced, with the Peace Prize awarded to Japan’s Nihon Hidankyo for its campaign against nuclear weapons."},
     ]
 
     rewrite_probability = 0.5
