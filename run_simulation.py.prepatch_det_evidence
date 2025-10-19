@@ -125,8 +125,6 @@ def main() -> None:
         print("Strategy used:", result.news_item.generator_strategy)
         print("Prompt digest:", result.generator_prompt_digest)
         print("Optimizer rationale:", result.generator_prompt_rationale)
-        print("Detector prompt digest:", result.detector_prompt_digest)
-        print("Detector optimizer rationale:", result.detector_prompt_rationale)
         print("Generator operation log:", result.news_item.operation_log)
         print("Generator evidence:", getattr(result.news_item, "generator_sources", None))
         print("Propagation history:", result.propagation_history)
@@ -139,7 +137,6 @@ def main() -> None:
         else:
             compact_payload = detector_payload
         print("Detector payload:", compact_payload)
-        print("Detector evidence:", getattr(result.news_item, "detector_sources", None))
         print("Score - Generator:", result.score.generator)
         print("Score - Detector:", result.score.detector)
         print()

@@ -2,28 +2,19 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from typing import Dict, Optional, Sequence
 
 from .base import AgentConfig, build_agent
 from ..tools.search import wikipedia_search
 from ..utils.parsing import coerce_int, ensure_dict_output
 
-DETECTOR_PROMPT = """You are a misinformation detector. For each article, community opinions, and any evidence you gather, decide whether the claim is real or fake.
-
-Workflow:
-1. Analyse the article content and community opinions.
-2. If helpful, optionally consult external sources (e.g., Google, Wikipedia, recognised authoritative websites or forums) before reaching a verdict.
-3. Produce a clear explanation summarising the evidence and reasoning behind your decision.
-
-Respond strictly with JSON:
-{
-  \"authenticity\": 1 or 0,
-  \"operation_log\": \"<concise reasoning referencing key evidence>\",
-  \"evidence\": [\"<URL to source 1>\", ...]
-}
-If you do not consult any external sources, return an empty list for evidence.
-"""
+DETECTOR_PROMPT = (
+    "You are a misinformation detector. Given a piece of news, optional community"
+    " opinions, and optional external evidence, combine internal reasoning to determine"
+    " authenticity. Output JSON with fields `authenticity` (1 for fake, 0 for real)"
+    " and `operation_log` summarising the supporting evidence."
+)
 
 
 def _format_evidence(news: str) -> str:
@@ -48,7 +39,6 @@ class DetectorAgentConfig(AgentConfig):
 class DetectorAgent:
     def __init__(self, config: Optional[DetectorAgentConfig] = None) -> None:
         cfg = config or DetectorAgentConfig(name="detector", system_prompt=DETECTOR_PROMPT)
-        self._config = cfg
         self._agent = build_agent(cfg)
 
     def detect(
@@ -71,24 +61,10 @@ class DetectorAgent:
         raw_result = self._agent.act(prompt)
         parsed = ensure_dict_output(
             raw_result,
-            expected_keys=("authenticity", "operation_log", "evidence"),
-            defaults={"authenticity": 0, "operation_log": "", "evidence": []},
+            expected_keys=("authenticity", "operation_log"),
+            defaults={"authenticity": 0, "operation_log": ""},
         )
         parsed["authenticity"] = coerce_int(parsed.get("authenticity", 0), fallback=0)
-        evidence = parsed.get("evidence")
-        if not isinstance(evidence, list):
-            parsed["evidence"] = []
         if strategy_hint:
             parsed.setdefault("strategy_hint", strategy_hint)
         return parsed
-
-
-    def update_prompt(self, new_system_prompt: str) -> None:
-        if not new_system_prompt or not new_system_prompt.strip():
-            return
-        self._config = replace(self._config, system_prompt=new_system_prompt)
-        self._agent = build_agent(self._config)
-
-    @property
-    def system_prompt(self) -> str:
-        return self._config.system_prompt

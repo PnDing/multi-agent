@@ -11,7 +11,7 @@ from ..community.graph import CommunityGraph
 from ..community.persona import BeliefProfile, Persona
 from ..core.news import NewsItem
 from ..core.orchestrator import OpinionCallback, SimulationOrchestrator
-from ..optimization.detector_optimizer import DetectorStrategyOptimizer
+from ..optimization.detector_strategy_agent import DetectorStrategyAgent
 from ..optimization.generator_optimizer import GeneratorStrategyOptimizer
 from ..scoring.metrics import ScoreCalculator
 
@@ -43,7 +43,7 @@ def build_default_orchestrator(
     score_calculator: Optional[ScoreCalculator] = None,
     propagation_rounds: int = 2,
     generator_optimizer: Optional[GeneratorStrategyOptimizer] = None,
-    detector_optimizer: Optional[DetectorStrategyOptimizer] = None,
+    detector_strategy_agent: Optional[DetectorStrategyAgent] = None,
 ) -> SimulationOrchestrator:
     generator = AgentFactory.build_generator(generator_config)
     detector = AgentFactory.build_detector(detector_config)
@@ -62,7 +62,7 @@ def build_default_orchestrator(
         opinion_callback=opinion_callback,
         propagation_rounds=propagation_rounds,
         generator_optimizer=generator_optimizer or GeneratorStrategyOptimizer(),
-        detector_optimizer=detector_optimizer or DetectorStrategyOptimizer(),
+        detector_strategy_agent=detector_strategy_agent or DetectorStrategyAgent(),
     )
 
 
