@@ -44,6 +44,7 @@ def build_default_orchestrator(
     propagation_rounds: int = 2,
     generator_optimizer: Optional[GeneratorStrategyOptimizer] = None,
     detector_strategy_agent: Optional[DetectorStrategyAgent] = None,
+    enable_user_feedback: bool = True,
 ) -> SimulationOrchestrator:
     generator = AgentFactory.build_generator(generator_config)
     detector = AgentFactory.build_detector(detector_config)
@@ -63,6 +64,7 @@ def build_default_orchestrator(
         propagation_rounds=propagation_rounds,
         generator_optimizer=generator_optimizer or GeneratorStrategyOptimizer(),
         detector_strategy_agent=detector_strategy_agent or DetectorStrategyAgent(),
+        enable_user_feedback=enable_user_feedback,
     )
 
 

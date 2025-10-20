@@ -58,6 +58,7 @@ class SimulationOrchestrator:
         propagation_rounds: int = 1,
         generator_optimizer: Optional[GeneratorStrategyOptimizer] = None,
         detector_strategy_agent: Optional[DetectorStrategyAgent] = None,
+        enable_user_feedback: bool = True,
     ) -> None:
         self._generator = generator
         self._detector = detector
@@ -76,6 +77,7 @@ class SimulationOrchestrator:
         self._fallback_prompt = generator.system_prompt
         self._latest_optimizer_rationale = ""
 
+        self._enable_user_feedback = enable_user_feedback
         self._detector_strategy_agent = detector_strategy_agent or DetectorStrategyAgent()
         self._detector_prompt_history: Deque[Dict[str, Any]] = deque(maxlen=self._detector_strategy_agent.history_limit)
         self._current_detector_prompt = detector.system_prompt
@@ -133,12 +135,16 @@ class SimulationOrchestrator:
         news_item.rewrite_applied = rewrite
         logger.info("Generated news %s", news_id)
 
-        rounds = propagation_rounds or self._base_propagation_rounds
-        propagation_history, infected_users = self._propagate(news_item, seed_users, rounds)
+        if self._enable_user_feedback:
+            rounds = propagation_rounds or self._base_propagation_rounds
+            propagation_history, infected_users = self._propagate(news_item, seed_users, rounds)
+        else:
+            propagation_history = []
+            infected_users = set()
         news_item.propagation_history = propagation_history
         news_item.infected_users = sorted(infected_users)
 
-        opinions = self._gather_opinions(news_item)
+        opinions = self._gather_opinions(news_item) if self._enable_user_feedback else []
         news_item.opinions = opinions
 
         detector_result = self._detector.detect(
@@ -164,14 +170,15 @@ class SimulationOrchestrator:
             total_users=len(self._community),
         )
 
-        self._update_experience(
-            news_item=news_item,
-            detector_label=authenticity,
-            opinions=opinions,
-            ground_truth_final=ground_truth_final,
-            ground_truth_raw=ground_truth_raw,
-            round_index=round_index,
-        )
+        if self._enable_user_feedback:
+            self._update_experience(
+                news_item=news_item,
+                detector_label=authenticity,
+                opinions=opinions,
+                ground_truth_final=ground_truth_final,
+                ground_truth_raw=ground_truth_raw,
+                round_index=round_index,
+            )
         optimizer_strategy = generator_strategy if rewrite else None
         self._update_optimizers(optimizer_strategy, score)
 

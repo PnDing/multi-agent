@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import quote
 
+import html
+import re
 import requests
 
 try:
@@ -12,6 +15,130 @@ except ImportError:  # pragma: no cover - optional dependency
     tool = None  # type: ignore
 
 WIKIPEDIA_ENDPOINT = "https://en.wikipedia.org/w/api.php"
+
+
+def _build_wikipedia_url(title: Optional[str], pageid: Optional[int]) -> Optional[str]:
+    if title:
+        slug = quote(title.replace(" ", "_"))
+        return f"https://en.wikipedia.org/wiki/{slug}"
+    if pageid:
+        return f"https://en.wikipedia.org/?curid={pageid}"
+    return None
+
+
+def _clean_snippet(snippet: Optional[str]) -> str:
+    if not snippet:
+        return ""
+    text = html.unescape(snippet)
+    text = re.sub(r"<[^>]+>", "", text)
+    return " ".join(text.split())
+
+
+def _augment_results_with_fullurl(
+    session: requests.Session,
+    results: List[Dict[str, Any]],
+    timeout: float,
+) -> Dict[Any, Dict[str, Any]]:
+    pageids = [str(item.get("pageid")) for item in results if item.get("pageid")]
+    if not pageids:
+        return {}
+    params = {
+        "action": "query",
+        "pageids": "|".join(pageids),
+        "prop": "info|pageprops",
+        "inprop": "url",
+        "redirects": 1,
+        "format": "json",
+        "utf8": 1,
+        "formatversion": 2,
+    }
+    try:
+        response = session.get(
+            WIKIPEDIA_ENDPOINT,
+            params=params,
+            headers={"Accept": "application/json"},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+    except Exception:
+        return {}
+    payload = response.json()
+    pages = payload.get("query", {}).get("pages", []) or []
+    page_lookup: Dict[Any, Dict[str, Any]] = {}
+    title_lookup: Dict[str, Dict[str, Any]] = {}
+    for page in pages:
+        pid = page.get("pageid")
+        if pid is not None:
+            page_lookup[pid] = page
+        title = page.get("title")
+        if isinstance(title, str):
+            title_lookup[title] = page
+    redirects = payload.get("query", {}).get("redirects", []) or []
+    redirect_id_map: Dict[Any, Any] = {}
+    redirect_title_map: Dict[str, str] = {}
+    for red in redirects:
+        fromid = red.get("fromid")
+        toid = red.get("toid")
+        if fromid is not None and toid is not None:
+            redirect_id_map[fromid] = toid
+        from_title = red.get("from")
+        to_title = red.get("to")
+        if isinstance(from_title, str) and isinstance(to_title, str):
+            redirect_title_map[from_title] = to_title
+    extra_info: Dict[Any, Dict[str, Any]] = {}
+    for entry in results:
+        pid = entry.get("pageid")
+        page = page_lookup.get(pid)
+        if not page and pid in redirect_id_map:
+            page = page_lookup.get(redirect_id_map[pid])
+        if not page:
+            to_title = redirect_title_map.get(entry.get("title"))
+            if to_title:
+                page = title_lookup.get(to_title)
+        if not page:
+            continue
+        entry["canonical_title"] = page.get("title") or entry.get("title")
+        entry["pageid"] = page.get("pageid") or entry.get("pageid")
+        entry["url"] = (
+            page.get("fullurl")
+            or _build_wikipedia_url(page.get("title"), page.get("pageid"))
+            or entry.get("url")
+        )
+        entry["pageprops"] = page.get("pageprops") or {}
+        if page.get("missing") == "":
+            entry["missing"] = ""
+        extra_info[entry.get("pageid")] = page
+    return extra_info
+
+
+def _select_primary_result(
+    results: List[Dict[str, Any]],
+    session: requests.Session,
+    timeout: float,
+) -> List[Dict[str, Any]]:
+    def is_valid(entry: Dict[str, Any]) -> bool:
+        url = entry.get("url") or ""
+        if not url or url.startswith("https://en.wikipedia.org/w/index.php"):
+            return False
+        pageprops = entry.get("pageprops") or {}
+        if isinstance(pageprops, dict) and pageprops.get("disambiguation") == "":
+            return False
+        if entry.get("missing") == "":
+            return False
+        return True
+
+    for entry in results:
+        if is_valid(entry):
+            return [entry]
+
+    for entry in results:
+        pageprops = entry.get("pageprops") or {}
+        if isinstance(pageprops, dict) and pageprops.get("disambiguation") == "":
+            disambiguation_links = _extract_links_from_disambiguation(entry, session, timeout)
+            if disambiguation_links:
+                return disambiguation_links
+
+    return results[:1] if results else []
 
 
 @dataclass(slots=True)
@@ -32,6 +159,7 @@ class WikipediaClient:
             "srsearch": query,
             "format": "json",
             "utf8": 1,
+            "formatversion": 2,
             "srlimit": limit,
         }
         response = self._session.get(
@@ -43,16 +171,39 @@ class WikipediaClient:
         response.raise_for_status()
         payload = response.json()
         items = payload.get("query", {}).get("search", [])
-        results = [
-            {
-                "title": item.get("title"),
-                "snippet": item.get("snippet"),
-                "pageid": item.get("pageid"),
-                "timestamp": item.get("timestamp"),
-            }
-            for item in items
-        ]
-        return {"query": query, "results": results}
+        results: List[Dict[str, Any]] = []
+        for item in items:
+            url = _build_wikipedia_url(item.get("title"), item.get("pageid"))
+            results.append(
+                {
+                    "title": item.get("title"),
+                    "snippet": item.get("snippet"),
+                    "pageid": item.get("pageid"),
+                    "timestamp": item.get("timestamp"),
+                    "url": url,
+                    "clean_snippet": _clean_snippet(item.get("snippet")),
+                }
+            )
+        _augment_results_with_fullurl(self._session, results, self.timeout)
+
+        filtered = _select_primary_result(results)
+        return {
+            "query": query,
+            "results": filtered,
+            "suggestion": payload.get("query", {}).get("searchinfo", {}).get("suggestion"),
+        }
+
+
+def format_wikipedia_results(payload: Dict[str, Any]) -> str:
+    items = payload.get("results") or []
+    if not items:
+        return "No relevant Wikipedia entries found."
+    lines = []
+    for idx, item in enumerate(items, start=1):
+        cleaned = item.get("clean_snippet") or ""
+        url = item.get("url") or "URL unavailable"
+        lines.append(f"[{idx}] {cleaned} (URL: {url})")
+    return "\n".join(lines)
 
 
 if tool is not None:

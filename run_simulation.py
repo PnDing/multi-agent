@@ -69,7 +69,9 @@ def main() -> None:
     edges = [("u0", "u1"), ("u1", "u2"), ("u2", "u3"), ("u3", "u4"), ("u4", "u5"), ("u1", "u3"), ("u2", "u4"), ("u0", "u2")]
 
     base_url = os.getenv("OPENAI_BASE_URL")
-    model_name = "gpt-4o-2024-05-13"
+    model_name = "gpt-4o-mini-2024-07-18"
+
+    user_feedback_enabled = False
 
     generator_cfg = GeneratorAgentConfig(
         name="generator",
@@ -91,6 +93,7 @@ def main() -> None:
         detector_config=detector_cfg,
         opinion_callback=belief_reason_opinion_callback,
         propagation_rounds=5,
+        enable_user_feedback=user_feedback_enabled,
     )
 
     simulation_rounds = [
@@ -124,19 +127,17 @@ def main() -> None:
         print(f"=== Round {idx} ===")
         print("News:", config["news"])
         print("Rewrite applied:", apply_rewrite)
-        print("Ground truth (raw):", ground_truth_raw)
         print("Ground truth (final):", ground_truth_final)
         print("Generated news:", result.news_item.generated_text)
         print("Strategy used:", result.news_item.generator_strategy)
-        print("Prompt digest:", result.generator_prompt_digest)
         print("Optimizer rationale:", result.generator_prompt_rationale)
-        print("Detector prompt digest:", result.detector_prompt_digest)
         print("Detector optimizer rationale:", result.detector_prompt_rationale)
         print("Generator operation log:", result.news_item.operation_log)
         print("Generator evidence:", getattr(result.news_item, "generator_sources", None))
-        print("Propagation history:", result.propagation_history)
-        print("Infected users:", result.infected_users)
-        print("Opinions:", result.opinions)
+        if user_feedback_enabled:
+            print("Propagation history:", result.propagation_history)
+            print("Infected users:", result.infected_users)
+            print("Opinions:", result.opinions)
         detector_payload = result.detector_payload
         if isinstance(detector_payload, dict) and "raw_output" in detector_payload:
             compact_payload = dict(detector_payload)
