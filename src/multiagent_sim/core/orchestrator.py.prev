@@ -214,6 +214,7 @@ class SimulationOrchestrator:
 
         prompt_digest = self._prompt_digest(self._current_generator_prompt)
         prompt_sample = self._current_generator_prompt[:120]
+        proposal_rationale = getattr(self, "_latest_optimizer_rationale", "")
         self._record_generator_history(
             round_index=round_index,
             prompt=self._current_generator_prompt,
@@ -231,11 +232,10 @@ class SimulationOrchestrator:
             success=generator_success,
             should_optimize=optimize_generator,
         )
-        proposal_rationale = getattr(self, "_latest_optimizer_rationale", "")
-        proposal_confidence = getattr(self, "_latest_optimizer_confidence", 0.0)
 
         detector_prompt_digest = self._prompt_digest(self._current_detector_prompt)
         detector_prompt_sample = self._current_detector_prompt[:120]
+        detector_rationale = getattr(self, "_detector_latest_rationale", "")
         self._record_detector_history(
             round_index=round_index,
             prompt=self._current_detector_prompt,
@@ -250,8 +250,6 @@ class SimulationOrchestrator:
             success=detector_success,
             should_optimize=optimize_detector,
         )
-        detector_rationale = getattr(self, "_detector_latest_rationale", "")
-        detector_confidence = getattr(self, "_detector_latest_confidence", 0.0)
 
         return RoundResult(
             news_item=news_item,
@@ -266,11 +264,11 @@ class SimulationOrchestrator:
             generator_prompt_digest=prompt_digest,
             generator_prompt_sample=prompt_sample,
             generator_prompt_rationale=proposal_rationale,
-            generator_prompt_confidence=proposal_confidence,
+            generator_prompt_confidence=self._latest_optimizer_confidence,
             detector_prompt_digest=detector_prompt_digest,
             detector_prompt_sample=detector_prompt_sample,
             detector_prompt_rationale=detector_rationale,
-            detector_prompt_confidence=detector_confidence,
+            detector_prompt_confidence=self._detector_latest_confidence,
         )
 
     def _propagate(
