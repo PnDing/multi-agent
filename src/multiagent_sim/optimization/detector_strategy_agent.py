@@ -8,16 +8,20 @@ from ..agents.base import AgentConfig, build_agent
 from ..utils.parsing import ensure_dict_output
 
 
-OPTIMIZER_SYSTEM_PROMPT = """您是多智能体假新闻对抗系统中的检测优化器，核心任务是根据检测器的表现和生成器的攻击策略，动态优化检测器的提示词。您的每次决策需实现：
-1. 漏洞修复：解析检测失败案例，定位策略弱点；
-2. 误报规避：减少对真实新闻的误判；
-3. 评分进化：推动检测策略的评分持续提升。
+OPTIMIZER_SYSTEM_PROMPT = """你是多智能体假新闻对抗系统的检测提示词优化器。请根据历史记录和当前基线提示词，输出下一轮检测器的 system prompt 建议。
 
-请综合历史记录与当前基线提示词，生成新的检测器提示词，并给出理由与置信度。严格以 JSON 回复：
+要求：
+1. 聚焦检测失败或薄弱环节，并提出改进方向。
+2. 生成完整的新提示词（而非片段或增量）。
+3. 解释关键改动：为何有效、解决了哪些问题、预期效果如何。rationale 必须为非空字符串。
+4. 给出 0~1 之间的置信度 confidence。
+5. notes 字段可选，用于补充额外观察或提醒。
+
+务必严格以 JSON 回复，格式如下：
 {
-  "next_prompt": "<新的 system prompt 文本>",
-  "rationale": "<概述为何这样调整，可引用历史案例>",
-  "confidence": <0 到 1 之间的数值>,
+  "next_prompt": "<完整的新 system prompt>",
+  "rationale": "<非空理由，描述调整原因与预期效果>",
+  "confidence": <0 到 1 之间的浮点数>,
   "notes": "<可选补充>"
 }
 """
@@ -74,6 +78,7 @@ class DetectorStrategyAgent:
         parsed["confidence"] = max(0.0, min(1.0, parsed_conf))
         next_prompt = parsed.get("next_prompt") or default_prompt
         parsed["next_prompt"] = str(next_prompt)
+        parsed["rationale"] = str(parsed.get("rationale", "")).strip()
         return parsed
 
     def _compress_history(self, history: Sequence[Mapping[str, Any]]) -> List[str]:
@@ -94,6 +99,8 @@ class DetectorStrategyAgent:
             evidence = entry.get("evidence")
             if evidence:
                 line += f"; evidence={evidence[:2]}"
+            if entry.get("optimizer_skipped"):
+                line += "; optimizer_skipped=True"
             lines.append(line)
         return lines or ["No detector history available."]
 

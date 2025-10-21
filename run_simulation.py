@@ -131,6 +131,7 @@ def main() -> None:
         print("Generated news:", result.news_item.generated_text)
         print("Strategy used:", result.news_item.generator_strategy)
         print("Optimizer rationale:", result.generator_prompt_rationale)
+        print("opti_confidence:", result.generator_prompt_confidence)
         print("Detector optimizer rationale:", result.detector_prompt_rationale)
         print("Generator operation log:", result.news_item.operation_log)
         print("Generator evidence:", getattr(result.news_item, "generator_sources", None))
@@ -146,7 +147,8 @@ def main() -> None:
             compact_payload = detector_payload
         print("Detector payload:", compact_payload)
         print("Detector evidence:", getattr(result.news_item, "detector_sources", None))
-        print("Score - Generator:", result.score.generator)
+        if result.rewrite_applied:
+            print("Score - Generator:", result.score.generator)
         print("Score - Detector:", result.score.detector)
         print()
 

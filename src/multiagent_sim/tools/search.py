@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from urllib.parse import quote
 
 import html
@@ -111,24 +111,25 @@ def _augment_results_with_fullurl(
     return extra_info
 
 
+def _is_valid_entry(entry: Dict[str, Any]) -> bool:
+    url = entry.get("url") or ""
+    if not url or url.startswith("https://en.wikipedia.org/w/index.php"):
+        return False
+    pageprops = entry.get("pageprops") or {}
+    if isinstance(pageprops, dict) and pageprops.get("disambiguation") == "":
+        return False
+    if entry.get("missing") == "":
+        return False
+    return True
+
+
 def _select_primary_result(
     results: List[Dict[str, Any]],
     session: requests.Session,
     timeout: float,
 ) -> List[Dict[str, Any]]:
-    def is_valid(entry: Dict[str, Any]) -> bool:
-        url = entry.get("url") or ""
-        if not url or url.startswith("https://en.wikipedia.org/w/index.php"):
-            return False
-        pageprops = entry.get("pageprops") or {}
-        if isinstance(pageprops, dict) and pageprops.get("disambiguation") == "":
-            return False
-        if entry.get("missing") == "":
-            return False
-        return True
-
     for entry in results:
-        if is_valid(entry):
+        if _is_valid_entry(entry):
             return [entry]
 
     for entry in results:
@@ -139,6 +140,59 @@ def _select_primary_result(
                 return disambiguation_links
 
     return results[:1] if results else []
+
+
+def _extract_links_from_disambiguation(
+    entry: Dict[str, Any],
+    session: requests.Session,
+    timeout: float,
+) -> List[Dict[str, Any]]:
+    title = entry.get("canonical_title") or entry.get("title")
+    if not title:
+        return []
+    params = {
+        "action": "query",
+        "list": "search",
+        "srsearch": title,
+        "format": "json",
+        "utf8": 1,
+        "formatversion": 2,
+        "srlimit": 5,
+    }
+    try:
+        response = session.get(
+            WIKIPEDIA_ENDPOINT,
+            params=params,
+            headers={"Accept": "application/json"},
+            timeout=timeout,
+        )
+        response.raise_for_status()
+    except Exception:
+        return []
+    payload = response.json()
+    items = payload.get("query", {}).get("search", []) or []
+    candidates: List[Dict[str, Any]] = []
+    for item in items:
+        candidate_title = item.get("title")
+        if not candidate_title or candidate_title == title:
+            continue
+        candidates.append(
+            {
+                "title": candidate_title,
+                "snippet": item.get("snippet"),
+                "pageid": item.get("pageid"),
+                "timestamp": item.get("timestamp"),
+                "url": _build_wikipedia_url(candidate_title, item.get("pageid")),
+                "clean_snippet": _clean_snippet(item.get("snippet")),
+            }
+        )
+    if not candidates:
+        return []
+    _augment_results_with_fullurl(session, candidates, timeout)
+    for candidate in candidates:
+        if _is_valid_entry(candidate):
+            return [candidate]
+    return candidates[:1]
 
 
 @dataclass(slots=True)
@@ -186,11 +240,17 @@ class WikipediaClient:
             )
         _augment_results_with_fullurl(self._session, results, self.timeout)
 
-        filtered = _select_primary_result(results)
+        filtered = _select_primary_result(results, self._session, self.timeout)
+        suggestion = payload.get("query", {}).get("searchinfo", {}).get("suggestion")
+        if (not filtered or not _is_valid_entry(filtered[0])) and suggestion:
+            suggested = suggestion.strip()
+            if suggested and suggested.lower() != query.lower():
+                return self.search(suggested, limit)
+        resolved_query = (suggestion or query) if filtered else query
         return {
-            "query": query,
+            "query": resolved_query,
             "results": filtered,
-            "suggestion": payload.get("query", {}).get("searchinfo", {}).get("suggestion"),
+            "suggestion": suggestion,
         }
 
 

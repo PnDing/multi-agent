@@ -20,11 +20,11 @@ Constraints:
 - Respond strictly with JSON containing:
   {
     "next_prompt": "<complete system prompt for the generator>",
-    "rationale": "<why this prompt should work, key adjustments, and anticipated effect>",
+    "rationale": "<非空理由，描述调整原因与预期效果，why this prompt should work, key adjustments, and anticipated effect>",
     "confidence": <float between 0 and 1>,
     "notes": "<optional extra observations>"
   }
-- If unsure, still provide your best prompt (avoid empty prompts) and explain uncertainty in the rationale.
+-
 """
 
 
@@ -33,7 +33,7 @@ class StrategyOptimizerConfig(AgentConfig):
     pass
 
 
-class GeneratorStrategyAgent:
+class   GeneratorStrategyAgent:
     """Wraps an LLM that recommends updated generator prompts based on history."""
 
     def __init__(
@@ -81,6 +81,8 @@ class GeneratorStrategyAgent:
         parsed["confidence"] = max(0.0, min(1.0, parsed_conf))
         next_prompt = parsed.get("next_prompt") or default_prompt
         parsed["next_prompt"] = str(next_prompt)
+        rationale = parsed.get("rationale")
+        parsed["rationale"] = str(rationale)
         return parsed
 
     def _compress_history(self, history: Sequence[Mapping[str, Any]]) -> List[str]:

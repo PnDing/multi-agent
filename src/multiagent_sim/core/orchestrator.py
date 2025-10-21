@@ -1,4 +1,4 @@
-﻿"""Round-based simulation orchestrator."""
+"""Round-based simulation orchestrator."""
 from __future__ import annotations
 
 import re
@@ -40,9 +40,11 @@ class RoundResult:
     generator_prompt_digest: str
     generator_prompt_sample: str
     generator_prompt_rationale: str
+    generator_prompt_confidence: float
     detector_prompt_digest: str
     detector_prompt_sample: str
     detector_prompt_rationale: str
+    detector_prompt_confidence: float
 
 
 class SimulationOrchestrator:
@@ -76,14 +78,16 @@ class SimulationOrchestrator:
         self._last_successful_prompt = self._current_generator_prompt
         self._fallback_prompt = generator.system_prompt
         self._latest_optimizer_rationale = ""
+        self._latest_optimizer_confidence = 0.0
 
         self._enable_user_feedback = enable_user_feedback
-        self._detector_strategy_agent = detector_strategy_agent or DetectorStrategyAgent()
+        self._detector_strategy_agent =  DetectorStrategyAgent()
         self._detector_prompt_history: Deque[Dict[str, Any]] = deque(maxlen=self._detector_strategy_agent.history_limit)
         self._current_detector_prompt = detector.system_prompt
         self._last_successful_detector_prompt = self._current_detector_prompt
         self._detector_fallback_prompt = detector.system_prompt
         self._detector_latest_rationale = ""
+        self._detector_latest_confidence = 0.0
 
     def simulate_round(
         self,
@@ -99,7 +103,9 @@ class SimulationOrchestrator:
         round_index = self._round_index
         news_id = self._id_gen.next()
         self._latest_optimizer_rationale = ""
+        self._latest_optimizer_confidence = 0.0
         self._detector_latest_rationale = ""
+        self._detector_latest_confidence = 0.0
 
         if self._generator.system_prompt != self._current_generator_prompt:
             self._generator.update_prompt(self._current_generator_prompt)
@@ -185,6 +191,27 @@ class SimulationOrchestrator:
         detector_payload = detector_result if isinstance(detector_result, dict) else {"raw": detector_result}
         generator_success = score.generator.detection_evasion >= 100.0
         detector_success = authenticity == ground_truth_final
+
+        optimize_generator = True
+        optimize_detector = True
+        if not rewrite:
+            optimize_generator = False
+            self._latest_optimizer_rationale = "optimizer skipped: generator inactive (no rewrite)"
+            self._latest_optimizer_confidence = 0.0
+            optimize_detector = not detector_success
+            if detector_success:
+                self._detector_latest_rationale = "optimizer skipped: detector succeeded on authentic news"
+                self._detector_latest_confidence = 0.0
+        else:
+            if generator_success and not detector_success:
+                optimize_generator = False
+                self._latest_optimizer_rationale = "optimizer skipped: generator succeeded this round"
+                self._latest_optimizer_confidence = 0.0
+            elif detector_success and not generator_success:
+                optimize_detector = False
+                self._detector_latest_rationale = "optimizer skipped: detector succeeded this round"
+                self._detector_latest_confidence = 0.0
+
         prompt_digest = self._prompt_digest(self._current_generator_prompt)
         prompt_sample = self._current_generator_prompt[:120]
         proposal_rationale = getattr(self, "_latest_optimizer_rationale", "")
@@ -198,8 +225,13 @@ class SimulationOrchestrator:
             rewrite=rewrite,
             success=generator_success,
             news_item=news_item,
+            optimizer_skipped=(not optimize_generator) or (not rewrite),
         )
-        self._update_generator_prompt_after_round(rewrite=rewrite, success=generator_success)
+        self._update_generator_prompt_after_round(
+            rewrite=rewrite,
+            success=generator_success,
+            should_optimize=optimize_generator,
+        )
 
         detector_prompt_digest = self._prompt_digest(self._current_detector_prompt)
         detector_prompt_sample = self._current_detector_prompt[:120]
@@ -212,8 +244,12 @@ class SimulationOrchestrator:
             ground_truth=ground_truth_final,
             detector_payload=detector_payload,
             generator_strategy=generator_strategy,
+            optimizer_skipped=not optimize_detector,
         )
-        self._update_detector_prompt_after_round(success=detector_success)
+        self._update_detector_prompt_after_round(
+            success=detector_success,
+            should_optimize=optimize_detector,
+        )
 
         return RoundResult(
             news_item=news_item,
@@ -228,9 +264,11 @@ class SimulationOrchestrator:
             generator_prompt_digest=prompt_digest,
             generator_prompt_sample=prompt_sample,
             generator_prompt_rationale=proposal_rationale,
+            generator_prompt_confidence=self._latest_optimizer_confidence,
             detector_prompt_digest=detector_prompt_digest,
             detector_prompt_sample=detector_prompt_sample,
             detector_prompt_rationale=detector_rationale,
+            detector_prompt_confidence=self._detector_latest_confidence,
         )
 
     def _propagate(
@@ -294,6 +332,7 @@ class SimulationOrchestrator:
         rewrite: bool,
         success: bool,
         news_item: NewsItem,
+        optimizer_skipped: bool,
     ) -> None:
         entry: Dict[str, Any] = {
             "round": round_index,
@@ -308,13 +347,14 @@ class SimulationOrchestrator:
             "generator_operation": news_item.operation_log,
             "generator_evidence": generation_payload.get("evidence"),
             "detector_feedback": news_item.detector_operation_log,
+            "optimizer_skipped": optimizer_skipped,
         }
         self._prompt_history.append(entry)
         if success and rewrite:
             self._last_successful_prompt = prompt
 
-    def _update_generator_prompt_after_round(self, rewrite: bool, success: bool) -> None:
-        if not rewrite:
+    def _update_generator_prompt_after_round(self, rewrite: bool, success: bool, should_optimize: bool) -> None:
+        if not rewrite or not should_optimize:
             return
         history_for_agent = list(self._prompt_history)
         default_prompt = self._last_successful_prompt or self._fallback_prompt
@@ -327,6 +367,7 @@ class SimulationOrchestrator:
             confidence_value = float(confidence)
         except (TypeError, ValueError):
             confidence_value = 0.0
+        self._latest_optimizer_confidence = confidence_value
         adopt = bool(proposed_prompt.strip())
         if confidence_value < 0.2 and not success:
             adopt = False
@@ -359,6 +400,7 @@ class SimulationOrchestrator:
         ground_truth: int,
         detector_payload: Dict[str, Any],
         generator_strategy: Optional[str],
+        optimizer_skipped: bool,
     ) -> None:
         entry: Dict[str, Any] = {
             "round": round_index,
@@ -370,12 +412,15 @@ class SimulationOrchestrator:
             "generator_strategy": generator_strategy,
             "operation_log": detector_payload.get("operation_log") if isinstance(detector_payload, dict) else detector_payload,
             "evidence": detector_payload.get("evidence") if isinstance(detector_payload, dict) else None,
+            "optimizer_skipped": optimizer_skipped,
         }
         self._detector_prompt_history.append(entry)
         if success:
             self._last_successful_detector_prompt = prompt
 
-    def _update_detector_prompt_after_round(self, success: bool) -> None:
+    def _update_detector_prompt_after_round(self, success: bool, should_optimize: bool) -> None:
+        if not should_optimize:
+            return
         history_for_agent = list(self._detector_prompt_history)
         if not history_for_agent:
             return
@@ -389,6 +434,7 @@ class SimulationOrchestrator:
             confidence_value = float(confidence)
         except (TypeError, ValueError):
             confidence_value = 0.0
+        self._detector_latest_confidence = confidence_value
         adopt = bool(proposed_prompt.strip())
         if confidence_value < 0.2 and not success:
             adopt = False
