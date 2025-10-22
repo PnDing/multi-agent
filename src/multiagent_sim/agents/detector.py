@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional, Sequence
 
 from .base import AgentConfig, build_agent
-from ..tools.search import format_wikipedia_results, wikipedia_search
+from ..tools.search import format_search_results, serper_search
 from ..utils.parsing import coerce_int, ensure_dict_output
 
 DETECTOR_PROMPT = """You are a misinformation detector working in explicit phases depending on instructions.
@@ -13,11 +13,11 @@ DETECTOR_PROMPT = """You are a misinformation detector working in explicit phase
 Phase ANALYSIS:
 - Review the article and community opinions.
 - Summarise core claims and flag statements needing verification.
-- Propose up to five targeted Wikipedia searches.
+- Propose up to five targeted serper_search queries.
 - Respond with JSON: {"claims_summary": "...", "suspect_points": ["..."], "wiki_requests": [{"query": "...", "target": "..."}]}
 
 Phase VERDICT:
-- You receive the article, suspect list, and Wikipedia snippets with URLs.
+- You receive the article, suspect list, and external search snippets with URLs.
 - Decide if the article is misinformation (authenticity 1) or genuine (authenticity 0).
 - Provide a concise operation_log citing the decisive evidence and list supporting URLs only.
 - Respond with JSON: {"authenticity": 0 or 1, "operation_log": "...", "evidence": ["https://..."]}
@@ -48,8 +48,8 @@ class DetectorAgent:
         strategy_hint: Optional[str] = None,
     ) -> Dict[str, int | str | Dict[str, int | str]]:
         analysis = self._run_analysis(news, opinions, strategy_hint)
-        wiki_context, collected_urls = self._gather_wikipedia_context(analysis)
-        verdict = self._run_verdict(news, analysis, wiki_context, collected_urls, strategy_hint)
+        search_context, collected_urls = self._gather_search_context(analysis)
+        verdict = self._run_verdict(news, analysis, search_context, collected_urls, strategy_hint)
         authenticity_value = coerce_int(verdict.get("authenticity", 0), fallback=0)
         verdict["authenticity"] = 0 if authenticity_value == 0 else 1
         if strategy_hint:
@@ -72,7 +72,10 @@ class DetectorAgent:
         opinions: Optional[Sequence[str]],
         strategy_hint: Optional[str],
     ) -> Dict[str, Any]:
-        sections = ["PHASE: ANALYSIS", "Review the article and provide JSON with claims and wiki requests."]
+        sections = [
+            "PHASE: ANALYSIS",
+            "Review the article and provide JSON with claims plus serper_search requests.",
+        ]
         if strategy_hint:
             sections.append(f"Strategy hint: {strategy_hint}")
         sections.append(f"Article:\n{news}")
@@ -92,7 +95,7 @@ class DetectorAgent:
             parsed["claims_summary"] = str(parsed.get("claims_summary"))
         return parsed
 
-    def _gather_wikipedia_context(self, analysis: Dict[str, Any]) -> tuple[str, List[str]]:
+    def _gather_search_context(self, analysis: Dict[str, Any]) -> tuple[str, List[str]]:
         sections: List[str] = []
         urls: List[str] = []
         for request in analysis.get("wiki_requests", []):
@@ -101,11 +104,11 @@ class DetectorAgent:
                 continue
             target = request.get("target", "").strip()
             try:
-                result = wikipedia_search(query)
+                result = serper_search(query)
             except Exception as exc:  # pragma: no cover - network dependence
                 sections.append(f"Query: {query}\nTarget: {target or 'N/A'}\nEvidence lookup failed: {exc}")
                 continue
-            formatted = format_wikipedia_results(result)
+            formatted = format_search_results(result)
             urls.extend(
                 [
                     item.get("url")
@@ -114,18 +117,21 @@ class DetectorAgent:
                 ]
             )
             sections.append(f"Query: {query}\nTarget: {target or 'N/A'}\n{formatted}")
-        context = "\n\n".join(sections) if sections else "No relevant Wikipedia entries found."
+        context = "\n\n".join(sections) if sections else "No external search results were retrieved."
         return context, urls
 
     def _run_verdict(
         self,
         news: str,
         analysis: Dict[str, Any],
-        wiki_context: str,
+        search_context: str,
         collected_urls: List[str],
         strategy_hint: Optional[str],
     ) -> Dict[str, Any]:
-        sections = ["PHASE: VERDICT", "Use the evidence to decide authenticity. Return JSON with URL evidence."]
+        sections = [
+            "PHASE: VERDICT",
+            "Use the evidence to decide authenticity. Return JSON with URL evidence.",
+        ]
         if strategy_hint:
             sections.append(f"Strategy hint: {strategy_hint}")
         suspect_points = analysis.get("suspect_points", [])
@@ -134,13 +140,13 @@ class DetectorAgent:
         else:
             suspect_block = "Suspect points:\n- None recorded."
         sections.extend(
-            [
-                f"Article:\n{news}",
-                f"Claims summary:\n{analysis.get('claims_summary', '')}",
-                suspect_block,
-                f"Wikipedia evidence:\n{wiki_context}",
-            ]
-        )
+                [
+                    f"Article:\n{news}",
+                    f"Claims summary:\n{analysis.get('claims_summary', '')}",
+                    suspect_block,
+                    f"External evidence:\n{search_context}",
+                ]
+            )
         prompt = "\n\n".join(sections)
         raw = self._agent.act(prompt)
         parsed = ensure_dict_output(

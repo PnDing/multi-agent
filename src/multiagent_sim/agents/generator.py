@@ -5,7 +5,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Dict, List, Optional
 
 from .base import AgentConfig, build_agent
-from ..tools.search import format_wikipedia_results, wikipedia_search
+from ..tools.search import format_search_results, serper_search
 from ..utils.parsing import ensure_dict_output
 
 GENERATOR_PROMPT = """You are a professional misinformation editor collaborating with other agents. You operate in two explicit phases depending on the user instruction.
@@ -13,11 +13,11 @@ GENERATOR_PROMPT = """You are a professional misinformation editor collaborating
 Phase ANALYSIS:
 - Read the original article.
 - Identify important factual anchors (actors, locations, dates, numbers).
-- Propose up to five Wikipedia search queries you want to review before rewriting.
+- Propose up to five serper_search queries you want to review before rewriting.
 - Always reply with JSON: {"claims_summary": "...", "wiki_requests": [{"query": "...", "reason": "..."}]}
 
 Phase REWRITE:
-- You receive the original article, your prior analysis, and Wikipedia snippets with URLs.
+- You receive the original article, your prior analysis, and external search snippets with URLs.
 - Choose exactly one strategy from the catalogue and rewrite the article into persuasive misinformation.
 - Document how the strategy is applied and cite supporting evidence using URL strings only.
 - Reply with JSON: {"strategy_used": "...", "modified_news": "...", "operation_log": "...", "evidence": ["https://..."]}
@@ -53,8 +53,8 @@ class GeneratorAgent:
 
     def generate(self, original_news: str, strategy_hint: Optional[str] = None) -> Dict[str, Any]:
         analysis = self._run_analysis(original_news)
-        wiki_context, collected_urls = self._gather_wikipedia_context(analysis)
-        rewrite = self._run_rewrite(original_news, analysis, wiki_context, collected_urls)
+        evidence_context, collected_urls = self._gather_search_context(analysis)
+        rewrite = self._run_rewrite(original_news, analysis, evidence_context, collected_urls)
         if not rewrite.get("strategy_used"):
             rewrite["strategy_used"] = "unspecified"
         if not rewrite.get("modified_news"):
@@ -75,7 +75,8 @@ class GeneratorAgent:
     def _run_analysis(self, original_news: str) -> Dict[str, Any]:
         prompt = (
             "PHASE: ANALYSIS\n"
-            "Analyse the article and request Wikipedia support as needed. Respond with the prescribed JSON.\n\n"
+            "Analyse the article and request external evidence via serper_search as needed. "
+            "Respond with the prescribed JSON.\n\n"
             f"Original article:\n{original_news}\n"
         )
         raw_result = self._agent.act(prompt)
@@ -89,7 +90,7 @@ class GeneratorAgent:
             parsed["claims_summary"] = str(parsed.get("claims_summary"))
         return parsed
 
-    def _gather_wikipedia_context(self, analysis: Dict[str, Any]) -> tuple[str, List[str]]:
+    def _gather_search_context(self, analysis: Dict[str, Any]) -> tuple[str, List[str]]:
         sections: List[str] = []
         evidence_urls: List[str] = []
         requests = analysis.get("wiki_requests") or []
@@ -99,11 +100,11 @@ class GeneratorAgent:
                 continue
             reason = request.get("reason", "").strip()
             try:
-                result = wikipedia_search(query)
+                result = serper_search(query)
             except Exception as exc:  # pragma: no cover - network dependence
                 sections.append(f"Query: {query}\nReason: {reason or 'N/A'}\nEvidence lookup failed: {exc}")
                 continue
-            formatted = format_wikipedia_results(result)
+            formatted = format_search_results(result)
             urls = [
                 item.get("url")
                 for item in result.get("results", [])
@@ -118,16 +119,16 @@ class GeneratorAgent:
         self,
         original_news: str,
         analysis: Dict[str, Any],
-        wiki_context: str,
+        evidence_context: str,
         collected_urls: List[str],
     ) -> Dict[str, Any]:
         prompt = (
             "PHASE: REWRITE\n"
-            "Use the article, your analysis, and Wikipedia evidence to craft misinformation. "
+            "Use the article, your analysis, and external evidence to craft misinformation. "
             "Return the prescribed JSON with evidence URLs only.\n\n"
             f"Original article:\n{original_news}\n\n"
             f"Your analysis summary:\n{analysis.get('claims_summary', '')}\n\n"
-            f"Wikipedia evidence:\n{wiki_context}\n"
+            f"External evidence:\n{evidence_context}\n"
         )
         raw_result = self._agent.act(prompt)
         parsed = ensure_dict_output(
